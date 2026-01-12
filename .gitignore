@@ -1,15 +1,12 @@
 # Rotador SimBank - Archivos a ignorar
 
-# ⚠️ SEGURIDAD: Archivos con credenciales
-*.bat
-ADVERTENCIA_SEGURIDAD.txt
-
 # Datos privados
 listadonumeros_claro.txt
 
-# Logs
+# Logs (no subir)
 *.log
 log_activacion_rotador.txt
+rotador_simbank_*.log
 
 # Estado y métricas locales
 rotador_state.json

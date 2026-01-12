@@ -48,8 +48,8 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.6.0"  # Added auto-update, PostgreSQL integration, and database export
-    REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"  # ACTUALIZAR con tu repo
+    VERSION = "2.6.1"  # Fixed PostgreSQL fecha_actualizacion column error
+    REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Slots
     SLOT_MIN = 1
@@ -591,8 +591,7 @@ def crear_tabla_db():
                 id SERIAL PRIMARY KEY,
                 iccid VARCHAR(20) UNIQUE NOT NULL,
                 numero_telefono VARCHAR(15) NOT NULL,
-                fecha_activacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                fecha_activacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
@@ -628,8 +627,8 @@ def guardar_numero_db(iccid: str, numero: str, puerto: str) -> bool:
             # Si existe, actualizar con el nuevo número
             numero_anterior = registro_existente[0]
             cursor.execute(
-                f"UPDATE {Settings.DB_TABLE} SET numero_telefono = %s, fecha_actualizacion = %s WHERE iccid = %s",
-                (numero, fecha_actual, iccid)
+                f"UPDATE {Settings.DB_TABLE} SET numero_telefono = %s WHERE iccid = %s",
+                (numero, iccid)
             )
             log_activacion(f"🔄 [{puerto}] ICCID {iccid} actualizado en DB: {numero_anterior} → {numero}")
         else:

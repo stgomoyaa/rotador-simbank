@@ -1,0 +1,93 @@
+============================================================
+  ARCHIVOS ESENCIALES DEL ROTADOR SIMBANK v2.6.0
+============================================================
+
+📁 ARCHIVOS QUE DEBES COPIAR A OTRA MÁQUINA:
+---------------------------------------------
+
+✅ ESENCIALES (Obligatorios):
+   
+   1. RotadorSimBank.py
+      → Script principal del rotador
+      → 2,292 líneas de código
+      → Incluye todas las funcionalidades
+   
+   2. INSTALAR.bat
+      → Instala las dependencias de Python
+      → Ejecutar PRIMERO en máquina nueva
+   
+   3. EJECUTAR.bat
+      → Ejecuta el rotador
+      → Doble clic para iniciar
+
+
+✅ RECOMENDADOS:
+   
+   4. INSTRUCCIONES.txt
+      → Guía rápida de uso
+      → Solución de problemas
+   
+   5. .gitignore
+      → Para Git (si usas control de versiones)
+   
+   6. README.md
+      → Documentación para GitHub
+
+
+❌ NO COPIAR (Se generan automáticamente):
+   
+   ✗ listadonumeros_claro.txt
+     → Se genera cuando activas SIMs
+   
+   ✗ *.log
+     → Logs del rotador
+   
+   ✗ rotador_state.json
+     → Estado local (se crea automático)
+   
+   ✗ rotador_metrics.json
+     → Métricas locales
+   
+   ✗ snapshots/
+     → Carpeta de snapshots
+
+
+============================================================
+  RESUMEN: COPIAR SOLO 3-6 ARCHIVOS
+============================================================
+
+MÍNIMO (3 archivos):
+   RotadorSimBank.py
+   INSTALAR.bat
+   EJECUTAR.bat
+
+RECOMENDADO (6 archivos):
+   RotadorSimBank.py
+   INSTALAR.bat
+   EJECUTAR.bat
+   INSTRUCCIONES.txt
+   .gitignore
+   README.md
+
+
+============================================================
+  PASOS EN MÁQUINA NUEVA:
+============================================================
+
+1. Copiar los archivos esenciales
+
+2. Instalar Python 3.7+
+   https://www.python.org/downloads/
+
+3. Ejecutar: INSTALAR.bat
+   (Instala pyserial, rich, psycopg2-binary)
+
+4. Configurar puertos COM (si son diferentes)
+   Editar RotadorSimBank.py líneas 92-96
+
+5. Ejecutar: EJECUTAR.bat
+   ¡Listo!
+
+
+============================================================
+
