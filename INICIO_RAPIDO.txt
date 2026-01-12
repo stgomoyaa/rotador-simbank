@@ -1,0 +1,174 @@
+╔════════════════════════════════════════════════════════════════╗
+║     ROTADOR SIMBANK v2.4.0 - GUÍA DE INICIO RÁPIDO           ║
+╚════════════════════════════════════════════════════════════════╝
+
+█ INSTALACIÓN (Primera vez - 2 minutos)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Instalar Python 3.8+ (si no lo tienes)
+   → https://www.python.org/downloads/
+
+2. Instalar dependencias:
+   pip install pyserial rich
+
+3. Verificar instalación:
+   python RotadorSimBank.py --self-test
+
+
+█ CONFIGURACIÓN (5 minutos)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Abrir RotadorSimBank.py
+2. Buscar línea 83: SIM_BANKS = {
+3. Ajustar los COM según tu hardware:
+
+   SIM_BANKS = {
+       "Pool1": {"com": "COM62", "puertos": ["01"..."08"], "offset_slot": 0},
+       "Pool2": {"com": "COM60", "puertos": ["01"..."08"], "offset_slot": 8},
+       "Pool3": {"com": "COM61", "puertos": ["01"..."08"], "offset_slot": 16},
+       "Pool4": {"com": "COM59", "puertos": ["01"..."08"], "offset_slot": 24},
+   }
+
+4. Verificar que HeroSMS-Partners esté instalado en:
+   C:\Users\TU_USUARIO\Desktop\SimClient.lnk
+
+
+█ EJECUTAR (10 segundos)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌─────────────────────────────────────────────────────────────┐
+│ MODO 1: ROTACIÓN CONTINUA (Normal - 24/7)                  │
+└─────────────────────────────────────────────────────────────┘
+
+   python RotadorSimBank.py
+
+   • Rota cada 30 minutos automáticamente
+   • Abre/cierra programa en cada rotación
+   • Corre infinitamente hasta cancelar (Ctrl+C)
+   • Ideal para operación diaria
+
+
+┌─────────────────────────────────────────────────────────────┐
+│ MODO 2: ACTIVACIÓN MASIVA (1024 SIMs de una vez)           │
+└─────────────────────────────────────────────────────────────┘
+
+   python RotadorSimBank.py --activacion-masiva
+
+   • Procesa los 32 slots sin parar
+   • Cierra programa al inicio, lo abre solo al final
+   • Toma 2-3 horas
+   • Ideal para setup inicial
+
+
+█ ARCHIVOS IMPORTANTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ RotadorSimBank.py              → Script principal (esencial)
+✓ listadonumeros_claro.txt       → Números activados (se crea automático)
+✓ log_activacion_rotador.txt     → Log de activaciones (se crea automático)
+✓ rotador_simbank_YYYY-MM-DD.log → Log diario (se crea automático)
+✓ rotador_state.json              → Estado actual (se crea automático)
+✓ rotador_metrics.json            → Métricas (se crea automático)
+
+
+█ COMANDOS ÚTILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Probar sin tocar hardware
+python RotadorSimBank.py --dry-run
+
+# Verificar COM ports
+python RotadorSimBank.py --self-test
+
+# Empezar desde un slot específico
+python RotadorSimBank.py --slot-start 15
+
+# Cambiar intervalo de rotación
+python RotadorSimBank.py --intervalo 15
+
+# Activación masiva en modo prueba
+python RotadorSimBank.py --activacion-masiva --dry-run
+
+
+█ PROBLEMAS COMUNES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❌ "Ya hay una instancia ejecutándose"
+   → Borrar archivo: rotador.lock
+
+❌ "No se detectan COM de SIM Bank"
+   → Verificar configuración de COMs en línea 83
+   → Ejecutar: python RotadorSimBank.py --self-test
+
+❌ "No se encontró SimClient"
+   → Verificar que esté en C:\Users\TU_USUARIO\Desktop\SimClient.lnk
+
+❌ "ModuleNotFoundError: No module named 'serial'"
+   → Ejecutar: pip install pyserial rich
+
+
+█ RESULTADOS ESPERADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Modo Normal (por rotación):
+  • Tiempo: ~5 minutos
+  • Activaciones: 3-5 números
+  • 48 rotaciones/día = 144-240 números/día
+
+Modo Masivo (32 slots completos):
+  • Tiempo: 2-3 horas
+  • Activaciones: 120-200 números
+  • 1 vez cada tanto (setup/refresh)
+
+
+█ MONITOREO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+En tiempo real:
+  • Observa la consola (muestra progreso en vivo)
+
+Después:
+  • Ver log_activacion_rotador.txt (activaciones detalladas)
+  • Ver rotador_simbank_YYYY-MM-DD.log (log completo)
+  • Ver listadonumeros_claro.txt (todos los números)
+  • Ver rotador_metrics.json (estadísticas)
+
+
+█ DETENER EL PROGRAMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Ctrl + C en la consola
+
+El programa guardará el estado actual y podrás continuar después
+desde donde quedó.
+
+
+█ CARACTERÍSTICAS PRINCIPALES v2.4.0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✓ Verificación de registro en red (AT+CREG?)
+✓ Verificación de señal (AT+CSQ)
+✓ Activación automática de SIMs Claro
+✓ Guardado de números en SIM (myphone)
+✓ Blacklist de puertos problemáticos
+✓ Estado persistente (continúa si se reinicia)
+✓ Logs detallados y métricas
+✓ Modo activación masiva (nuevo)
+✓ Offsets escalonados (sin duplicados entre pools)
+
+
+█ SOPORTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Si tienes problemas:
+1. Revisa los logs
+2. Ejecuta --self-test
+3. Verifica que HeroSMS-Partners funcione manualmente
+4. Verifica configuración de COMs
+
+
+╔════════════════════════════════════════════════════════════════╗
+║  ¡LISTO! Ya puedes ejecutar el rotador                        ║
+║  Comando básico: python RotadorSimBank.py                     ║
+╚════════════════════════════════════════════════════════════════╝
+

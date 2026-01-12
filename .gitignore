@@ -1,0 +1,52 @@
+# Rotador SimBank - Archivos a ignorar
+
+# ⚠️ SEGURIDAD: Archivos con credenciales
+*.bat
+ADVERTENCIA_SEGURIDAD.txt
+
+# Datos privados
+listadonumeros_claro.txt
+
+# Logs
+*.log
+log_activacion_rotador.txt
+
+# Estado y métricas locales
+rotador_state.json
+rotador_metrics.json
+iccids_history.json
+rotador.lock
+
+# Snapshots
+snapshots/
+
+# Archivos temporales de actualización
+*.backup
+*.new
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Otros archivos temporales
+*.tmp
+*.temp
+
