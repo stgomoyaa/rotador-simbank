@@ -1,5 +1,10 @@
 # Rotador SimBank - Archivos a ignorar
 
+# ⚠️ SEGURIDAD: Archivos con credenciales (NO SUBIR)
+GIT_PUSH.bat
+_GIT_PUSH_CON_TOKEN.bat
+CONFIGURAR_GIT.txt
+
 # Datos privados
 listadonumeros_claro.txt
 
