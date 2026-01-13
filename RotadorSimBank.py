@@ -48,7 +48,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.6.2"  # Fixed auto-update restart with spaces in path + auto-confirm in mass activation
+    VERSION = "2.6.3"  # Fixed AttributeError in cambiar_slot_pool when accessing puertos_mapeados
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Slots
@@ -79,7 +79,7 @@ class Settings:
     UMBRAL_PUERTO_INESTABLE = 3  # Fallos consecutivos antes de marcar puerto
     
     # Blacklist permanente de puertos defectuosos (fix para timeouts recurrentes)
-    PUERTOS_BLACKLIST = ["COM52", "COM35"]  # Puertos con fallas constantes (88% y 83% timeout)
+    PUERTOS_BLACKLIST = []  # Puertos con fallas constantes (88% y 83% timeout)
     
     # Archivos
     LOG_FILE = "rotador_simbank.log"
@@ -117,10 +117,10 @@ class Settings:
 # IMPORTANTE: Los puertos lógicos de cada SIM Bank son siempre 01-08
 # NOTA: COMs corregidos según hardware real detectado
 SIM_BANKS = {
-    "Pool1": {"com": "COM62", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 0},
-    "Pool2": {"com": "COM60", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 8},
-    "Pool3": {"com": "COM61", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 16},
-    "Pool4": {"com": "COM59", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 24},
+    "Pool1": {"com": "COM38", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 0},
+    "Pool2": {"com": "COM37", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 8},
+    "Pool3": {"com": "COM36", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 16},
+    "Pool4": {"com": "COM35", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 24},
 }
 
 # Variables globales
@@ -1382,10 +1382,9 @@ def cambiar_slot_pool(pool_name: str, pool_config: dict, slot_base: int):
     console.print(f"[blue]  🔄 {pool_name}: Slot {slot_real:02d} (base {slot_base:02d} + offset {offset_slot}) en {sim_bank_com}[/blue]")
     
     # PASO 1: Obtener ICCIDs actuales de algunos módems del pool (para verificar cambio)
-    modems_pool = []
-    for puerto, info in puertos_mapeados.items():
-        if info.get("sim_bank_com") == sim_bank_com and puerto not in Settings.PUERTOS_BLACKLIST:
-            modems_pool.append(puerto)
+    # Nota: puertos_mapeados solo tiene el número lógico, no sabemos qué pool es cada uno
+    # Usamos todos los puertos mapeados que no estén en blacklist
+    modems_pool = [puerto for puerto in puertos_mapeados.keys() if puerto not in Settings.PUERTOS_BLACKLIST]
     
     # Tomar muestra de 3 módems para verificar (no todos para ser más rápido)
     modems_muestra = modems_pool[:3] if len(modems_pool) >= 3 else modems_pool
