@@ -4,6 +4,9 @@
 GIT_PUSH.bat
 _GIT_PUSH_CON_TOKEN.bat
 CONFIGURAR_GIT.txt
+SOLUCION_ALTERNATIVA.txt
+PUSH_LIMPIO_FORZADO.bat
+LIMPIAR_Y_SUBIR.bat
 
 # Datos privados
 listadonumeros_claro.txt
