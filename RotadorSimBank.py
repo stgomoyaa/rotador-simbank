@@ -48,7 +48,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.6.1"  # Fixed PostgreSQL fecha_actualizacion column error
+    VERSION = "2.6.2"  # Fixed auto-update restart with spaces in path + auto-confirm in mass activation
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Slots
@@ -482,9 +482,13 @@ def descargar_actualizacion(url: str) -> bool:
         console.print("[green]✅ Script actualizado exitosamente![/green]")
         console.print("[yellow]🔄 Reiniciando con la nueva versión...[/yellow]\n")
         
-        # Reiniciar el script
+        # Reiniciar el script (maneja rutas con espacios correctamente)
         time.sleep(2)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        
+        # Usar subprocess para manejar rutas con espacios
+        import subprocess
+        subprocess.Popen([sys.executable] + sys.argv)
+        sys.exit(0)
         
         return True
         
@@ -2155,6 +2159,10 @@ def main():
         console.print("[yellow]🔄 Actualizando script...[/yellow]")
         actualizar_script()
         return
+    
+    # Si es modo activación masiva, activar auto-update para no pedir confirmación
+    if args.activacion_masiva:
+        Settings.AUTO_UPDATE = True
     
     # Verificar actualizaciones al inicio (si no se desactiva)
     if not args.no_update_check and Settings.CHECK_UPDATES:
