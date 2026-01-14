@@ -56,6 +56,15 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"])
     from PIL import ImageGrab, Image
 
+try:
+    import mss
+except ImportError:
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "mss"])
+        import mss
+    except:
+        mss = None
+
 import base64
 from io import BytesIO
 
@@ -65,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.10.2"  # Fixed encoding errors with emojis in Windows services
+    VERSION = "2.10.3"  # Fixed screenshot capture for Windows services (Session 0)
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2565,12 +2574,54 @@ class AgenteControlRemoto:
             return False
     
     def take_screenshot(self):
-        """Toma una captura de pantalla y la retorna en base64"""
+        """Toma una captura de pantalla y la retorna en base64
+        
+        Intenta múltiples métodos en orden:
+        1. mss (funciona mejor con servicios de Windows)
+        2. PIL/ImageGrab
+        3. PowerShell (fallback para servicios)
+        """
+        # Método 1: Usar mss (funciona en Session 0)
+        if mss is not None:
+            try:
+                console.print("[cyan]📸 Intentando captura con mss...[/cyan]")
+                
+                with mss.mss() as sct:
+                    # Capturar el monitor principal
+                    monitor = sct.monitors[1]
+                    screenshot_raw = sct.grab(monitor)
+                    
+                    # Convertir a PIL Image
+                    screenshot = Image.frombytes('RGB', screenshot_raw.size, screenshot_raw.rgb)
+                    
+                    # Redimensionar para reducir tamaño
+                    max_width = 1280
+                    if screenshot.width > max_width:
+                        ratio = max_width / screenshot.width
+                        new_size = (max_width, int(screenshot.height * ratio))
+                        screenshot = screenshot.resize(new_size, Image.Resampling.LANCZOS)
+                    
+                    # Convertir a JPEG y comprimir
+                    buffer = BytesIO()
+                    screenshot.save(buffer, format='JPEG', quality=75, optimize=True)
+                    buffer.seek(0)
+                    
+                    # Codificar en base64
+                    img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                    
+                    console.print("[green]✅ Captura exitosa con mss[/green]")
+                    return img_base64
+                    
+            except Exception as e:
+                console.print(f"[yellow]⚠️  mss falló: {e}[/yellow]")
+        
+        # Método 2: Usar PIL ImageGrab
         try:
-            # Capturar pantalla
+            console.print("[cyan]📸 Intentando captura con PIL ImageGrab...[/cyan]")
+            
             screenshot = ImageGrab.grab()
             
-            # Redimensionar para reducir tamaño (max 1280px de ancho)
+            # Redimensionar para reducir tamaño
             max_width = 1280
             if screenshot.width > max_width:
                 ratio = max_width / screenshot.width
@@ -2585,10 +2636,79 @@ class AgenteControlRemoto:
             # Codificar en base64
             img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
             
+            console.print("[green]✅ Captura exitosa con PIL[/green]")
             return img_base64
+            
         except Exception as e:
-            console.print(f"[red]❌ Error capturando pantalla: {e}[/red]")
-            return None
+            console.print(f"[yellow]⚠️  PIL falló: {e}[/yellow]")
+        
+        # Método 3: Usar PowerShell (fallback para servicios)
+        try:
+            console.print("[cyan]📸 Intentando captura con PowerShell...[/cyan]")
+            
+            import tempfile
+            screenshot_path = os.path.join(tempfile.gettempdir(), f"screenshot_{int(time.time())}.png")
+            
+            # Script PowerShell para capturar pantalla
+            ps_script = f"""
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+            $bitmap.Save('{screenshot_path}', [System.Drawing.Imaging.ImageFormat]::Png)
+            $graphics.Dispose()
+            $bitmap.Dispose()
+            """
+            
+            # Ejecutar PowerShell
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                capture_output=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            if result.returncode == 0 and os.path.exists(screenshot_path):
+                # Leer y procesar la imagen
+                screenshot = Image.open(screenshot_path)
+                
+                # Redimensionar
+                max_width = 1280
+                if screenshot.width > max_width:
+                    ratio = max_width / screenshot.width
+                    new_size = (max_width, int(screenshot.height * ratio))
+                    screenshot = screenshot.resize(new_size, Image.Resampling.LANCZOS)
+                
+                # Convertir a JPEG
+                buffer = BytesIO()
+                screenshot.save(buffer, format='JPEG', quality=75, optimize=True)
+                buffer.seek(0)
+                
+                # Limpiar archivo temporal
+                try:
+                    os.remove(screenshot_path)
+                except:
+                    pass
+                
+                # Codificar en base64
+                img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                
+                console.print("[green]✅ Captura exitosa con PowerShell[/green]")
+                return img_base64
+            else:
+                console.print(f"[yellow]⚠️  PowerShell falló: {result.stderr.decode() if result.stderr else 'Unknown error'}[/yellow]")
+                
+        except Exception as e:
+            console.print(f"[yellow]⚠️  PowerShell falló: {e}[/yellow]")
+        
+        # Si todos los métodos fallaron
+        console.print("[red]❌ Todos los métodos de captura fallaron[/red]")
+        console.print("[yellow]💡 Nota: Los servicios de Windows (Session 0) no pueden capturar la pantalla del usuario.[/yellow]")
+        console.print("[yellow]💡 Para usar capturas de pantalla, ejecuta el agente manualmente: python RotadorSimBank.py --agente[/yellow]")
+        
+        return None
     
     def get_system_status(self):
         """Obtiene el estado del sistema"""

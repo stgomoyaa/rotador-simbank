@@ -37,7 +37,7 @@ findstr /C:"VERSION = " RotadorSimBank.py
 echo.
 
 echo [3/3] Instalando dependencias...
-python -m pip install --upgrade Pillow
+python -m pip install --upgrade Pillow mss
 echo.
 
 echo [4/4] Reiniciando servicio del agente...

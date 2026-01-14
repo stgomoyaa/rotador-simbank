@@ -671,8 +671,471 @@ export default function Dashboard() {
 
 ---
 
+---
+
+## 🏗️ ARQUITECTURA DEL SISTEMA COMPLETO
+
+### Flujo de Comunicación:
+
+```
+┌─────────────────┐         ┌──────────────────┐         ┌─────────────────┐
+│   Dashboard     │  HTTP   │  Vercel API      │  HTTP   │ Agente Local    │
+│   (Frontend)    │ ◄────► │  (Backend KV)    │ ◄────► │ (Servidor)      │
+└─────────────────┘         └──────────────────┘         └─────────────────┘
+      │                              │                            │
+      │                              │                            │
+   Usuario                      Redis/KV Storage            RotadorSimBank.py
+   Envía Cmd                    • Commands Queue            • Poll cada 10s
+   Ve Status                    • Machines State            • Ejecuta comandos
+                                • Command Results           • Envía heartbeat
+```
+
+---
+
+## ⚠️ PROBLEMAS DETECTADOS EN TU DASHBOARD
+
+### 🔴 **Problema 1: Backend No Almacena Respuestas de Comandos**
+
+**Síntoma:** Los logs no se muestran aunque el comando se envió correctamente.
+
+**Causa:** Tu API de Vercel NO está guardando las respuestas del agente en Vercel KV.
+
+**Solución requerida:**
+
+```typescript
+// app/api/commands/route.ts (DEBE IMPLEMENTARSE)
+
+import { kv } from '@vercel/kv'
+
+export async function POST(request: Request) {
+  const body = await request.json()
+  const { machine_id, action, status, result } = body
+  
+  if (action === 'response') {
+    // ✅ CRÍTICO: Guardar respuesta del agente
+    const commandId = result.command_id
+    
+    await kv.set(`command_result:${machine_id}:${commandId}`, {
+      success: result.success,
+      message: result.message,
+      logs: result.logs,          // Para comandos get_logs
+      screenshot: result.screenshot, // Para take_screenshot
+      timestamp: Date.now()
+    }, { ex: 3600 }) // Expira en 1 hora
+    
+    return Response.json({ success: true })
+  }
+  
+  if (action === 'command') {
+    // Guardar comando pendiente
+    await kv.rpush(`commands:${machine_id}`, body.command)
+    return Response.json({ success: true, command_id: crypto.randomUUID() })
+  }
+  
+  return Response.json({ error: 'Invalid action' }, { status: 400 })
+}
+```
+
+---
+
+### 🔴 **Problema 2: Frontend No Hace Polling de Resultados**
+
+**Síntoma:** El dashboard dice "Comando enviado" pero nunca muestra la respuesta.
+
+**Causa:** El frontend envía el comando pero NO espera/busca la respuesta.
+
+**Solución requerida:**
+
+```typescript
+// components/Dashboard.tsx
+
+const [commandResults, setCommandResults] = useState({})
+const [pendingCommands, setPendingCommands] = useState({})
+
+const sendCommand = async (machineId, command) => {
+  try {
+    // 1. Enviar comando
+    const response = await fetch('/api/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        machine_id: machineId,
+        action: 'command',
+        command: command
+      })
+    })
+    
+    const { command_id } = await response.json()
+    
+    // 2. ✅ CRÍTICO: Hacer polling del resultado
+    setPendingCommands(prev => ({ ...prev, [command_id]: true }))
+    
+    pollCommandResult(machineId, command_id, command)
+    
+  } catch (error) {
+    alert(`❌ Error: ${error.message}`)
+  }
+}
+
+const pollCommandResult = async (machineId, commandId, commandType) => {
+  let attempts = 0
+  const maxAttempts = 30 // 30 segundos
+  
+  const interval = setInterval(async () => {
+    attempts++
+    
+    try {
+      const response = await fetch(`/api/command-result?machine_id=${machineId}&command_id=${commandId}`)
+      const result = await response.json()
+      
+      if (result.success && result.data) {
+        clearInterval(interval)
+        setPendingCommands(prev => {
+          const newState = { ...prev }
+          delete newState[commandId]
+          return newState
+        })
+        
+        // Mostrar resultado según el tipo de comando
+        if (commandType === 'get_logs' || commandType === 'get_activation_logs' || commandType === 'get_agent_logs') {
+          setLogs(prev => ({ ...prev, [machineId]: result.data.logs }))
+          setShowLogs(prev => ({ ...prev, [machineId]: true }))
+        } else if (commandType === 'take_screenshot') {
+          setScreenshots(prev => ({ ...prev, [machineId]: result.data.screenshot }))
+          setShowScreenshot(prev => ({ ...prev, [machineId]: true }))
+        } else {
+          alert(`✅ ${result.data.message}`)
+        }
+      }
+      
+      if (attempts >= maxAttempts) {
+        clearInterval(interval)
+        alert('⏱️ Timeout: El comando no respondió en 30 segundos')
+      }
+    } catch (error) {
+      console.error('Error polling result:', error)
+    }
+  }, 1000) // Poll cada segundo
+}
+```
+
+---
+
+### 🔴 **Problema 3: El Agente No Reporta Resultados al Backend**
+
+**Síntoma:** El agente ejecuta el comando pero Vercel no recibe la respuesta.
+
+**Causa:** El agente LOCAL no tiene forma de enviar la respuesta de vuelta a Vercel.
+
+**Solución:** Ya está implementado en v2.10.2, pero necesitas actualizar el servidor:
+
+```python
+# En RotadorSimBank.py (YA IMPLEMENTADO)
+
+def execute_command(self, command_data):
+    """Ejecuta un comando y RETORNA el resultado al API"""
+    command = command_data.get("command", "")
+    command_id = command_data.get("command_id", "")
+    
+    result = self.process_command(command)
+    
+    # ✅ Enviar resultado de vuelta al API
+    try:
+        response = requests.post(
+            f"{self.api_url}/response",
+            json={
+                "machine_id": self.machine_id,
+                "action": "response",
+                "command_id": command_id,
+                "result": result
+            },
+            headers={"Authorization": f"Bearer {self.auth_token}"},
+            timeout=10
+        )
+    except Exception as e:
+        console.print(f"[red]❌ Error enviando resultado: {e}[/red]")
+```
+
+---
+
+## 🛠️ BACKEND REQUERIDO PARA VERCEL
+
+Tu dashboard necesita estos **3 endpoints de API**:
+
+### 1️⃣ `/api/commands` - Recibir Comandos desde Frontend
+
+```typescript
+// app/api/commands/route.ts
+
+import { kv } from '@vercel/kv'
+
+export async function POST(request: Request) {
+  const auth = request.headers.get('authorization')
+  if (!auth || !auth.includes(process.env.AUTH_TOKEN)) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  
+  const body = await request.json()
+  const { machine_id, command } = body
+  
+  const commandId = crypto.randomUUID()
+  
+  // Guardar comando pendiente para que el agente lo consuma
+  await kv.rpush(`pending_commands:${machine_id}`, {
+    command_id: commandId,
+    command: command,
+    timestamp: Date.now()
+  })
+  
+  return Response.json({ success: true, command_id: commandId })
+}
+
+// GET: Obtener comandos pendientes (para el agente)
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const machineId = searchParams.get('machine_id')
+  
+  if (!machineId) {
+    return Response.json({ error: 'Missing machine_id' }, { status: 400 })
+  }
+  
+  // Obtener y eliminar el primer comando pendiente
+  const command = await kv.lpop(`pending_commands:${machineId}`)
+  
+  if (command) {
+    return Response.json({ command })
+  }
+  
+  return Response.json({ command: null })
+}
+```
+
+---
+
+### 2️⃣ `/api/command-result` - Obtener Resultado de Comando
+
+```typescript
+// app/api/command-result/route.ts
+
+import { kv } from '@vercel/kv'
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const machineId = searchParams.get('machine_id')
+  const commandId = searchParams.get('command_id')
+  
+  if (!machineId || !commandId) {
+    return Response.json({ error: 'Missing parameters' }, { status: 400 })
+  }
+  
+  // Buscar resultado del comando
+  const result = await kv.get(`command_result:${machineId}:${commandId}`)
+  
+  if (result) {
+    return Response.json({ success: true, data: result })
+  }
+  
+  return Response.json({ success: false, data: null })
+}
+```
+
+---
+
+### 3️⃣ `/api/heartbeat` - Recibir Heartbeats del Agente
+
+```typescript
+// app/api/heartbeat/route.ts
+
+import { kv } from '@vercel/kv'
+
+export async function POST(request: Request) {
+  const auth = request.headers.get('authorization')
+  if (!auth || !auth.includes(process.env.AUTH_TOKEN)) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  
+  const body = await request.json()
+  const { machine_id, custom_name, status } = body
+  
+  // Guardar estado de la máquina (expira en 60 segundos)
+  await kv.set(`machine:${machine_id}`, {
+    machine_id,
+    custom_name: custom_name || machine_id,
+    last_seen: Date.now(),
+    status,
+    online: true
+  }, { ex: 60 })
+  
+  return Response.json({ success: true })
+}
+
+// GET: Obtener todas las máquinas conectadas
+export async function GET() {
+  const keys = await kv.keys('machine:*')
+  const machines = await Promise.all(
+    keys.map(key => kv.get(key))
+  )
+  
+  // Filtrar máquinas offline (last_seen > 60 segundos)
+  const now = Date.now()
+  const onlineMachines = machines.filter(m => 
+    m && (now - m.last_seen) < 60000
+  )
+  
+  return Response.json({ machines: onlineMachines })
+}
+```
+
+---
+
+## 📦 DEPENDENCIAS REQUERIDAS
+
+### package.json (Vercel):
+
+```json
+{
+  "dependencies": {
+    "@vercel/kv": "^1.0.0",
+    "next": "^14.0.0",
+    "react": "^18.0.0"
+  }
+}
+```
+
+### Variables de Entorno (Vercel):
+
+```bash
+# .env.local
+AUTH_TOKEN=tu_token_secreto_12345
+KV_REST_API_URL=https://xxx.upstash.io
+KV_REST_API_TOKEN=tu_token_upstash
+```
+
+---
+
+## 🎯 FUNCIONALIDADES ADICIONALES RECOMENDADAS
+
+### 1️⃣ **Alertas y Notificaciones** 🔔
+
+```typescript
+// Detectar cuando un servicio se cae
+if (machine.services?.herosms?.status === 'stopped') {
+  // Enviar notificación (email, Telegram, Discord)
+  await sendAlert(`⚠️ Hero-SMS detenido en ${machine.custom_name}`)
+}
+```
+
+### 2️⃣ **Historial de Uptime** 📊
+
+```typescript
+// Guardar métricas cada minuto
+await kv.zadd(`uptime:${machine_id}`, {
+  score: Date.now(),
+  member: JSON.stringify({
+    herosms: machine.services.herosms.status,
+    rotador: machine.services.rotador.status,
+    cpu: machine.system.cpu_percent
+  })
+})
+```
+
+### 3️⃣ **Gráficas de CPU/RAM** 📈
+
+```typescript
+// Mostrar gráfica de CPU de las últimas 24h
+const metrics = await kv.zrange(`uptime:${machine_id}`, 
+  Date.now() - 86400000, // Últimas 24h
+  Date.now(),
+  { byScore: true }
+)
+```
+
+### 4️⃣ **Programar Comandos (Cron)** ⏰
+
+```typescript
+// Ejecutar comando a una hora específica
+await kv.set(`scheduled_cmd:${machine_id}:${Date.now()}`, {
+  command: 'restart_herosms',
+  scheduled_for: '2026-01-15T03:00:00Z'
+})
+```
+
+### 5️⃣ **Múltiples Usuarios con Roles** 👥
+
+```typescript
+// Admin: puede todo
+// Viewer: solo ve estado
+// Operator: puede reiniciar servicios pero no PC
+
+const userRole = await kv.get(`user:${userId}:role`)
+
+if (command === 'restart_pc' && userRole !== 'admin') {
+  return Response.json({ error: 'Unauthorized' }, { status: 403 })
+}
+```
+
+### 6️⃣ **Backup Automático de Configuración** 💾
+
+```typescript
+// Guardar configuración cada día
+await kv.set(`backup:${machine_id}:${Date.now()}`, {
+  sim_banks: machine.config.sim_banks,
+  settings: machine.config.settings
+})
+```
+
+### 7️⃣ **Estadísticas de Activación de SIMs** 📱
+
+```typescript
+// Mostrar cuántas SIMs se activaron hoy/semana/mes
+const stats = {
+  today: await kv.get(`stats:${machine_id}:${today}`),
+  week: await kv.get(`stats:${machine_id}:${week}`),
+  month: await kv.get(`stats:${machine_id}:${month}`)
+}
+```
+
+### 8️⃣ **Logs Persistentes con Búsqueda** 🔍
+
+```typescript
+// Guardar logs en Vercel KV con índice por fecha
+await kv.rpush(`logs:${machine_id}:${date}`, logEntry)
+
+// Buscar logs por keyword
+const results = await searchLogs(machine_id, 'ERROR')
+```
+
+### 9️⃣ **Comparación entre Servidores** ⚖️
+
+```jsx
+<div className="grid grid-cols-3 gap-4">
+  {machines.map(machine => (
+    <div>
+      <h3>{machine.custom_name}</h3>
+      <p>CPU: {machine.system.cpu_percent}%</p>
+      <p>Activaciones hoy: {machine.stats.today}</p>
+    </div>
+  ))}
+</div>
+```
+
+### 🔟 **Exportar Datos a Excel/CSV** 📊
+
+```typescript
+const exportData = () => {
+  const csv = machines.map(m => 
+    `${m.custom_name},${m.system.cpu_percent},${m.services.herosms.status}`
+  ).join('\n')
+  
+  downloadCSV(csv, 'machines-report.csv')
+}
+```
+
+---
+
 ## 🔗 Enlaces Útiles
 
 - **Repositorio GitHub:** https://github.com/stgomoyaa/rotador-simbank
 - **Dashboard Vercel:** https://claro-pool-dashboard.vercel.app
 - **Documentación completa:** README.md
+- **Vercel KV Docs:** https://vercel.com/docs/storage/vercel-kv
