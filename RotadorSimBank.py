@@ -65,7 +65,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.10.1"  # Fixed agent auto-restart after updates
+    VERSION = "2.10.2"  # Fixed encoding errors with emojis in Windows services
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2522,6 +2522,15 @@ class AgenteControlRemoto:
     """Agente que escucha comandos remotos desde el dashboard de Vercel"""
     
     def __init__(self):
+        # Configurar encoding UTF-8 para evitar errores con emojis en servicios de Windows
+        try:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8', errors='ignore')
+            if hasattr(sys.stderr, 'reconfigure'):
+                sys.stderr.reconfigure(encoding='utf-8', errors='ignore')
+        except:
+            pass
+        
         self.api_url = Settings.AGENTE_API_URL
         self.auth_token = Settings.AGENTE_AUTH_TOKEN
         self.machine_id = platform.node()
