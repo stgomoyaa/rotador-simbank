@@ -1,4 +1,8 @@
 @echo off
+
+:: Cambiar al directorio donde está el .bat
+cd /d "%~dp0"
+
 echo ============================================================
 echo   ROTADOR SIMBANK v2.8.0
 echo ============================================================

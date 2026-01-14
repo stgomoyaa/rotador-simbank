@@ -1,8 +1,14 @@
 @echo off
 chcp 65001 >nul 2>&1
+
+:: Cambiar al directorio donde está el .bat
+cd /d "%~dp0"
+
 echo ============================================================
 echo   INSTALACION SIMPLE - Solo Dependencias
 echo ============================================================
+echo.
+echo Directorio de trabajo: %CD%
 echo.
 
 :: Verificar que Python este instalado
