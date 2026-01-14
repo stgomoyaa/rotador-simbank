@@ -55,7 +55,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.7.1"  # Default mode is now mass activation (--modo-continuo for old behavior)
+    VERSION = "2.8.0"  # Auto-detection of SIM Banks from HeroSMS-Partners logs
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -125,21 +125,170 @@ class Settings:
     CHECK_UPDATES = True  # Verificar actualizaciones al inicio
     AUTO_UPDATE = False  # Actualizar automáticamente (False = preguntar al usuario)
 
-# Configuración de SIM Banks (4 pools)
+# Configuración de SIM Banks (auto-detectada o manual)
 # IMPORTANTE: Los puertos lógicos de cada SIM Bank son siempre 01-08
-# NOTA: COMs corregidos según hardware real detectado
-SIM_BANKS = {
+# NOTA: Esta configuración se detecta automáticamente desde HeroSMS-Partners
+# Si la auto-detección falla, se usa esta configuración por defecto
+SIM_BANKS_DEFAULT = {
     "Pool1": {"com": "COM38", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 0},
     "Pool2": {"com": "COM37", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 8},
     "Pool3": {"com": "COM36", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 16},
     "Pool4": {"com": "COM35", "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"], "offset_slot": 24},
 }
 
+# Variable global que contendrá la configuración actual
+SIM_BANKS = {}
+
 # Variables globales
 puertos_mapeados = {}
 _mapeo_cargado = False
 puertos_inestables = {}  # {puerto: {"fallos": N, "ultima_vez": datetime}}
 contador_fallos_pool = {}  # {pool_name: contador}
+
+# ==================== AUTO-DETECCIÓN DE SIM BANKS ====================
+def detectar_simbanks_desde_log() -> dict:
+    """
+    Detecta automáticamente la configuración de SIM Banks desde el log de HeroSMS-Partners.
+    
+    Busca el archivo simBanks.txt y parsea las líneas de configuración.
+    Soporta diferentes formatos: 'Pool #1', 'Pool 1', 'Pool1', '1', etc.
+    
+    Returns:
+        dict: Diccionario con la configuración de SIM Banks detectada
+              Formato: {"Pool1": {"com": "COM38", "puertos": [...], "offset_slot": 0}, ...}
+              Retorna {} si no se pudo detectar
+    """
+    try:
+        # Buscar archivo simBanks.txt en HeroSMS-Partners
+        usuario = getpass.getuser()
+        log_path = rf"C:\Users\{usuario}\AppData\Local\HeroSMS-Partners\app\log\simBanks.txt"
+        
+        if not os.path.exists(log_path):
+            escribir_log(f"⚠️ No se encontró archivo de log: {log_path}")
+            return {}
+        
+        escribir_log(f"📂 Detectando SIM Banks desde: {log_path}")
+        
+        # Leer archivo y buscar líneas de configuración
+        pools_detectados = {}
+        
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for linea in f:
+                # Buscar líneas que contengan "Успешно добавлен" (Successfully added)
+                if "Успешно добавлен" in linea or "Успешно" in linea:
+                    # Formato: "COM62 'Pool #1' : Успешно добавлен"
+                    # O: "COM37 '1' : Успешно добавлен"
+                    
+                    # Extraer COM port
+                    match_com = re.search(r'COM(\d+)', linea)
+                    if not match_com:
+                        continue
+                    
+                    com_port = f"COM{match_com.group(1)}"
+                    
+                    # Extraer nombre del pool (entre comillas)
+                    match_pool = re.search(r"'([^']+)'", linea)
+                    if not match_pool:
+                        continue
+                    
+                    pool_name_raw = match_pool.group(1)
+                    
+                    # Normalizar nombre del pool
+                    # Soportar: "Pool #1", "Pool 1", "Pool1", "1", etc.
+                    match_number = re.search(r'(\d+)', pool_name_raw)
+                    if not match_number:
+                        continue
+                    
+                    pool_number = int(match_number.group(1))
+                    pool_name = f"Pool{pool_number}"
+                    
+                    # Agregar al diccionario
+                    if pool_name not in pools_detectados:
+                        pools_detectados[pool_name] = {
+                            "com": com_port,
+                            "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"],
+                            "offset_slot": (pool_number - 1) * 8,  # Offset automático: 0, 8, 16, 24
+                            "numero": pool_number
+                        }
+        
+        if not pools_detectados:
+            escribir_log("⚠️ No se detectaron SIM Banks en el log")
+            return {}
+        
+        # Ordenar por número de pool
+        pools_ordenados = dict(sorted(pools_detectados.items(), key=lambda x: x[1]['numero']))
+        
+        # Remover campo 'numero' que solo usamos para ordenar
+        for pool_config in pools_ordenados.values():
+            del pool_config['numero']
+        
+        # Mostrar configuración detectada
+        escribir_log("✅ SIM Banks detectados automáticamente:")
+        for pool_name, config in pools_ordenados.items():
+            escribir_log(f"   {pool_name}: {config['com']} (offset={config['offset_slot']})")
+        
+        return pools_ordenados
+        
+    except Exception as e:
+        escribir_log(f"❌ Error al detectar SIM Banks: {e}")
+        return {}
+
+def guardar_simbanks_config(config: dict):
+    """Guarda la configuración de SIM Banks detectada en un archivo JSON"""
+    try:
+        config_file = "simbanks_config.json"
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        escribir_log(f"💾 Configuración de SIM Banks guardada en: {config_file}")
+    except Exception as e:
+        escribir_log(f"⚠️ Error al guardar configuración: {e}")
+
+def cargar_simbanks_config() -> dict:
+    """Carga la configuración de SIM Banks desde el archivo JSON si existe"""
+    try:
+        config_file = "simbanks_config.json"
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            escribir_log(f"📂 Configuración de SIM Banks cargada desde: {config_file}")
+            return config
+    except Exception as e:
+        escribir_log(f"⚠️ Error al cargar configuración guardada: {e}")
+    return {}
+
+def inicializar_simbanks():
+    """
+    Inicializa la configuración de SIM Banks usando auto-detección o configuración por defecto.
+    
+    Prioridad:
+    1. Intentar detectar desde el log de HeroSMS-Partners
+    2. Si falla, cargar desde archivo guardado (simbanks_config.json)
+    3. Si falla, usar configuración por defecto (SIM_BANKS_DEFAULT)
+    """
+    global SIM_BANKS
+    
+    console.print("[cyan]🔍 Inicializando configuración de SIM Banks...[/cyan]")
+    
+    # 1. Intentar auto-detección desde log
+    config_detectada = detectar_simbanks_desde_log()
+    
+    if config_detectada:
+        SIM_BANKS = config_detectada
+        guardar_simbanks_config(config_detectada)
+        console.print("[green]✅ SIM Banks detectados automáticamente desde HeroSMS-Partners[/green]")
+        return
+    
+    # 2. Intentar cargar desde archivo guardado
+    config_guardada = cargar_simbanks_config()
+    if config_guardada:
+        SIM_BANKS = config_guardada
+        console.print("[yellow]⚠️ Usando configuración guardada (no se pudo auto-detectar)[/yellow]")
+        return
+    
+    # 3. Usar configuración por defecto
+    SIM_BANKS = SIM_BANKS_DEFAULT
+    console.print("[yellow]⚠️ Usando configuración por defecto (no se pudo auto-detectar ni cargar)[/yellow]")
+    console.print("[yellow]   Si los COM ports son incorrectos, edita SIM_BANKS_DEFAULT en el script[/yellow]")
 
 # ==================== DECORADORES Y UTILIDADES ====================
 def medir_tiempo(func):
@@ -1986,6 +2135,12 @@ Ejemplos de uso:
         help="Instalar el agente como servicio de Windows"
     )
     
+    parser.add_argument(
+        "--detectar-simbanks",
+        action="store_true",
+        help="Forzar detección de SIM Banks desde HeroSMS-Partners y salir"
+    )
+    
     return parser.parse_args()
 
 # ==================== SELF TEST ====================
@@ -2200,6 +2355,25 @@ def main():
     if Settings.DB_ENABLED:
         crear_tabla_db()
     
+    # Detectar SIM Banks y salir
+    if args.detectar_simbanks:
+        console.print("\n[bold cyan]🔍 DETECCIÓN DE SIM BANKS[/bold cyan]")
+        console.print("=" * 70 + "\n")
+        config = detectar_simbanks_desde_log()
+        if config:
+            guardar_simbanks_config(config)
+            console.print("\n[bold green]✅ Configuración detectada y guardada exitosamente[/bold green]")
+            console.print("\nConfiguración detectada:\n")
+            for pool_name, pool_config in config.items():
+                console.print(f"  [cyan]{pool_name}:[/cyan]")
+                console.print(f"    COM: {pool_config['com']}")
+                console.print(f"    Offset: {pool_config['offset_slot']}")
+                console.print(f"    Puertos: {', '.join(pool_config['puertos'])}\n")
+        else:
+            console.print("\n[bold red]❌ No se pudo detectar la configuración[/bold red]")
+            console.print("[yellow]Asegúrate de que HeroSMS-Partners esté instalado y haya logs disponibles[/yellow]")
+        return
+    
     # Exportar base de datos y salir
     if args.export_db:
         exportar_base_datos_completa()
@@ -2241,13 +2415,16 @@ def main():
     crear_lock()
     
     try:
-        # 2. Mostrar configuración
+        # 2. Inicializar configuración de SIM Banks (auto-detección)
+        inicializar_simbanks()
+        
+        # 3. Mostrar configuración
         mostrar_configuracion()
         
-        # 3. Validar que los COM de SIM Banks existan
+        # 4. Validar que los COM de SIM Banks existan
         validar_simbanks()
         
-        # 4. Cargar estado anterior (slot e iteración)
+        # 5. Cargar estado anterior (slot e iteración)
         slot_actual, iteracion = cargar_estado()
         
         # Override de slot si se especificó en CLI

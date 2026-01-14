@@ -25,6 +25,12 @@ rotador.lock
 # Snapshots
 snapshots/
 
+# Ejemplos y archivos de referencia
+Ejemplos simbank/
+
+# Configuración detectada automáticamente
+simbanks_config.json
+
 # Archivos temporales de actualización
 *.backup
 *.new
