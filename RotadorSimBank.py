@@ -55,7 +55,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.7.0"  # Integrated remote control agent with auto-install service
+    VERSION = "2.7.1"  # Default mode is now mass activation (--modo-continuo for old behavior)
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -104,7 +104,7 @@ class Settings:
     MODO_DRY_RUN = False  # Cambiar a True para probar sin hardware
     LOG_DIARIO = True  # Crear log por día
     ACTIVAR_SIMS_CLARO = True  # Activar SIMs Claro automáticamente después de cambiar slot
-    MODO_ACTIVACION_MASIVA = False  # Modo para activar todas las 1024 SIMs sin abrir/cerrar programa
+    MODO_ACTIVACION_MASIVA = True  # Modo por defecto: activar todas las 1024 SIMs sin abrir/cerrar programa
     
     # Activación de SIMs
     INTENTOS_ACTIVACION = 5  # Aumentado de 3 a 5 (más oportunidades)
@@ -1900,12 +1900,12 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos de uso:
-  python RotadorSimBank.py                          # Modo normal (rotación continua)
-  python RotadorSimBank.py --intervalo 15           # Rotar cada 15 minutos
+  python RotadorSimBank.py                          # Modo por defecto: Activación masiva (1024 SIMs)
+  python RotadorSimBank.py --modo-continuo          # Modo rotación continua cada 30 minutos
+  python RotadorSimBank.py --intervalo 15           # Cambiar intervalo (solo con --modo-continuo)
   python RotadorSimBank.py --dry-run                # Modo prueba sin hardware
   python RotadorSimBank.py --slot-start 10          # Comenzar desde slot 10
   python RotadorSimBank.py --self-test              # Probar COM ports y salir
-  python RotadorSimBank.py --activacion-masiva      # Activar todas las 1024 SIMs de una vez
   python RotadorSimBank.py --export-db              # Exportar PostgreSQL a archivo local
   python RotadorSimBank.py --clean-duplicates       # Limpiar duplicados del archivo
   python RotadorSimBank.py --update                 # Forzar actualización desde GitHub
@@ -1945,9 +1945,9 @@ Ejemplos de uso:
     )
     
     parser.add_argument(
-        "--activacion-masiva",
+        "--modo-continuo",
         action="store_true",
-        help="Modo activación masiva: Procesa los 32 slots (1024 SIMs) sin interrupciones"
+        help="Modo rotación continua: Rota cada 30 minutos indefinidamente (desactiva modo masivo por defecto)"
     )
     
     parser.add_argument(
@@ -2183,9 +2183,14 @@ def main():
         actualizar_script()
         return
     
-    # Si es modo activación masiva, activar auto-update para no pedir confirmación
-    if args.activacion_masiva:
+    # Si se especifica modo continuo, desactivar activación masiva
+    if args.modo_continuo:
+        Settings.MODO_ACTIVACION_MASIVA = False
+        console.print(f"[yellow]🔄 Modo ROTACIÓN CONTINUA activado[/yellow]")
+    else:
+        # Modo masivo por defecto, activar auto-update para no pedir confirmación
         Settings.AUTO_UPDATE = True
+        console.print(f"[yellow]🚀 Modo ACTIVACIÓN MASIVA activado (por defecto)[/yellow]")
     
     # Verificar actualizaciones al inicio (si no se desactiva)
     if not args.no_update_check and Settings.CHECK_UPDATES:
@@ -2214,26 +2219,20 @@ def main():
         Settings.MODO_DRY_RUN = True
         console.print(f"[yellow]🧪 Modo DRY RUN activado[/yellow]")
     
-    if args.activacion_masiva:
-        Settings.MODO_ACTIVACION_MASIVA = True
-        console.print(f"[yellow]🚀 Modo ACTIVACIÓN MASIVA activado[/yellow]")
-    
     # Si es self-test, ejecutar y salir
     if args.self_test:
         self_test()
         return
     
-    # Si es activación masiva, ejecutar y salir
-    if args.activacion_masiva:
-        console.print(f"\n[bold yellow]⚠️  MODO ACTIVACIÓN MASIVA[/bold yellow]")
-        console.print(f"[yellow]   Se procesarán los 32 slots (1024 SIMs) sin interrupciones[/yellow]")
-        console.print(f"[yellow]   Tiempo estimado: 2-3 horas[/yellow]")
-        console.print(f"[yellow]   El programa se abrirá solo al final[/yellow]\n")
-        
-        respuesta = input("¿Deseas continuar? (s/n): ")
-        if respuesta.lower() != 's':
-            console.print("[yellow]Operación cancelada[/yellow]")
-            return
+    # Si es activación masiva (modo por defecto), ejecutar y salir
+    if Settings.MODO_ACTIVACION_MASIVA:
+        console.print(f"\n[bold cyan]{'='*80}[/bold cyan]")
+        console.print(f"[bold cyan]🚀 MODO ACTIVACIÓN MASIVA[/bold cyan]")
+        console.print(f"[bold cyan]{'='*80}[/bold cyan]")
+        console.print(f"[cyan]   Se procesarán los 32 slots (1024 SIMs) sin interrupciones[/cyan]")
+        console.print(f"[cyan]   Tiempo estimado: 2-3 horas[/cyan]")
+        console.print(f"[cyan]   El programa se abrirá solo al final[/cyan]")
+        console.print(f"[bold cyan]{'='*80}[/bold cyan]\n")
         
         activacion_masiva_todas_las_sims()
         return
