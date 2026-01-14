@@ -1,4 +1,4 @@
-# 🔄 Rotador Automático de SIM Bank v2.8.1
+# 🔄 Rotador Automático de SIM Bank v2.10.3
 
 Sistema inteligente de rotación automática de slots en SIM Banks con activación de SIMs Claro, agente de control remoto 24/7 y auto-detección de configuración.
 
@@ -8,11 +8,12 @@ Sistema inteligente de rotación automática de slots en SIM Banks con activaci�
 
 ### 1. Copiar archivos al servidor
 
-**Solo necesitas 3 archivos:**
+**Solo necesitas 4 archivos:**
 ```
 📁 Servidor/
 ├── RotadorSimBank.py      ⭐ Script principal
 ├── INSTALAR.bat           ⭐ Instalador TODO EN UNO
+├── instalar_agente.ps1    🔧 Script de instalación del agente
 └── EJECUTAR.bat           💡 Menú de opciones
 ```
 
@@ -22,12 +23,12 @@ Sistema inteligente de rotación automática de slots en SIM Banks con activaci�
 
 **¡Eso es todo!** El instalador hace:
 - ✅ Verifica que Python esté instalado
-- ✅ Instala todas las dependencias
-- ✅ Descarga NSSM automáticamente
-- ✅ Instala el agente como servicio de Windows
-- ✅ Configura inicio automático
+- ✅ Instala todas las dependencias (pyserial, rich, psycopg2, requests, psutil, Pillow, mss)
+- ✅ Instala el agente como Tarea Programada de Windows
+- ✅ Configura inicio automático al iniciar sesión
+- ✅ Inicia el agente inmediatamente
 
-**Tiempo total:** ~3 minutos
+**Tiempo total:** ~2 minutos
 
 ---
 
@@ -74,10 +75,11 @@ Desde el dashboard puedes:
 
 ### El agente de control remoto:
 - ✅ Se instala automáticamente con `INSTALAR.bat`
-- ✅ Corre 24/7 como servicio de Windows
-- ✅ Se inicia automáticamente al encender el PC
+- ✅ Corre 24/7 como Tarea Programada de Windows
+- ✅ Se inicia automáticamente al iniciar sesión en Windows
 - ✅ Reporta estado cada 10 segundos (CPU, RAM, servicios)
 - ✅ Verifica actualizaciones cada 24 horas automáticamente
+- ✅ Soporte completo para capturas de pantalla remotas
 - ✅ Permite forzar actualización desde el dashboard
 - ✅ **Reinicia Hero-SMS cada 2 horas automáticamente** (solo si no está corriendo el rotador)
 - ✅ **Health check completo** (detecta si Hero-SMS y Rotador están corriendo)
@@ -110,19 +112,22 @@ python RotadorSimBank.py --detectar-simbanks
 
 ## 🔧 Comandos Útiles
 
-### Gestionar el servicio del agente
-```bash
+### Gestionar la Tarea Programada del agente
+```powershell
 # Ver estado
-nssm status AgenteRotadorSimBank
+Get-ScheduledTask -TaskName "AgenteRotadorSimBank"
 
-# Reiniciar
-nssm restart AgenteRotadorSimBank
+# Iniciar
+Start-ScheduledTask -TaskName "AgenteRotadorSimBank"
 
 # Detener
-nssm stop AgenteRotadorSimBank
+Stop-ScheduledTask -TaskName "AgenteRotadorSimBank"
 
-# Desinstalar
-nssm remove AgenteRotadorSimBank confirm
+# Ver información detallada
+Get-ScheduledTaskInfo -TaskName "AgenteRotadorSimBank"
+
+# Desinstalar (ejecutar en PowerShell)
+powershell -ExecutionPolicy Bypass -File desinstalar_agente.ps1
 ```
 
 ### Otros comandos
@@ -147,7 +152,7 @@ python RotadorSimBank.py --update
 
 ## 📱 Control Remoto desde Dashboard
 
-### Comandos Disponibles (v2.10.0)
+### Comandos Disponibles (v2.10.3)
 
 | Comando | Descripción | Nuevo |
 |---------|-------------|-------|
@@ -157,7 +162,7 @@ python RotadorSimBank.py --update
 | `start_rotador` | **Inicia el rotador** | ⭐ |
 | `restart_rotador` | Reinicia el script RotadorSimBank.py | |
 | `stop_rotador` | Detiene el script RotadorSimBank.py | |
-| `restart_agent` | **Reinicia el servicio del agente** | ⭐ |
+| `restart_agent` | **Reinicia la tarea del agente** | ⭐ |
 | `update` | Fuerza actualización del script | |
 | `get_logs` | Lee log principal | |
 | `get_activation_logs` | Lee log de activación | |

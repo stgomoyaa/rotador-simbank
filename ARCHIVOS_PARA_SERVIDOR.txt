@@ -1,0 +1,74 @@
+================================================================================
+  ARCHIVOS NECESARIOS PARA DESPLEGAR EN SERVIDOR - Rotador SimBank v2.10.3
+================================================================================
+
+ARCHIVOS ESENCIALES (4):
+================================================================================
+1. RotadorSimBank.py           - Script principal (core)
+2. INSTALAR.bat                - Instalador automatico
+3. instalar_agente.ps1         - Script PowerShell para crear tarea programada
+4. EJECUTAR.bat                - Menu de opciones
+
+ARCHIVOS OPCIONALES (recomendados):
+================================================================================
+5. README.md                   - Documentacion principal
+6. desinstalar_agente.ps1      - Script para desinstalar el agente
+7. INSTRUCCIONES_INSTALACION.md - Guia rapida de instalacion
+
+ARCHIVOS DE DOCUMENTACION (opcional para desarrollo):
+================================================================================
+- DASHBOARD_API.md             - API del dashboard
+- FUNCIONALIDADES_AVANZADAS.md - Features avanzadas
+
+================================================================================
+INSTRUCCIONES DE DESPLIEGUE:
+================================================================================
+
+1. Copia los 4 archivos ESENCIALES a una carpeta en el servidor
+   Ejemplo: C:\Rotador\
+
+2. Click derecho en INSTALAR.bat → "Ejecutar como administrador"
+
+3. El instalador hara TODO automaticamente:
+   - Verificar Python
+   - Instalar dependencias
+   - Crear Tarea Programada de Windows
+   - Iniciar el agente
+
+4. Verificar en PowerShell:
+   Get-ScheduledTask -TaskName "AgenteRotadorSimBank"
+
+5. Verificar en el dashboard (10-30 segundos):
+   https://claro-pool-dashboard.vercel.app
+
+================================================================================
+CAMBIOS IMPORTANTES EN v2.10.3:
+================================================================================
+
+✅ YA NO SE USA NSSM (eliminado)
+✅ Ahora usa Tarea Programada de Windows (mas confiable)
+✅ Las capturas de pantalla ahora funcionan
+✅ Instalacion mas simple y rapida
+✅ Mejor compatibilidad con rutas con espacios
+✅ Logs mas claros
+
+================================================================================
+COMANDOS UTILES:
+================================================================================
+
+Ver estado:
+  Get-ScheduledTask -TaskName "AgenteRotadorSimBank"
+
+Iniciar:
+  Start-ScheduledTask -TaskName "AgenteRotadorSimBank"
+
+Detener:
+  Stop-ScheduledTask -TaskName "AgenteRotadorSimBank"
+
+Ver logs:
+  Get-Content agente_stdout.log -Tail 20
+
+Desinstalar:
+  powershell -ExecutionPolicy Bypass -File desinstalar_agente.ps1
+
+================================================================================
