@@ -56,7 +56,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.9.0"  # Auto-restart Hero-SMS every 2h + Health check + Read logs from dashboard
+    VERSION = "2.9.1"  # Fixed service installation and improved error handling
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2849,38 +2849,62 @@ class AgenteControlRemoto:
     
     def run(self):
         """Bucle principal del agente"""
-        console.print("=" * 60)
-        console.print(f"[bold cyan]🤖 AGENTE DE CONTROL REMOTO - SIMBANK v{Settings.VERSION}[/bold cyan]")
-        console.print("=" * 60)
-        console.print(f"[cyan]📍 Máquina: {self.machine_id}[/cyan]")
-        console.print(f"[cyan]📡 API: {self.api_url}[/cyan]")
-        console.print(f"[cyan]⏱️  Intervalo: {self.poll_interval}s[/cyan]")
-        console.print("=" * 60)
-        console.print("\n[green]✅ Agente iniciado. Presiona Ctrl+C para detener.[/green]\n")
-        
-        while True:
+        try:
+            # Log inicial (incluso si rich console falla)
             try:
-                # Verificar actualizaciones cada 24 horas
-                self.verificar_actualizaciones_periodicas()
-                
-                # Reiniciar Hero-SMS cada 2 horas (solo si no está corriendo el rotador)
-                self.auto_restart_herosms_periodicamente()
-                
-                # Enviar estado
-                self.send_heartbeat()
-                
-                # Consultar comandos
-                self.poll_commands()
-                
-                # Esperar antes de la siguiente iteración
-                time.sleep(self.poll_interval)
-            
-            except KeyboardInterrupt:
-                console.print("\n\n[yellow]👋 Agente detenido por el usuario[/yellow]")
-                break
+                console.print("=" * 60)
+                console.print(f"[bold cyan]🤖 AGENTE DE CONTROL REMOTO - SIMBANK v{Settings.VERSION}[/bold cyan]")
+                console.print("=" * 60)
+                console.print(f"[cyan]📍 Máquina: {self.machine_id}[/cyan]")
+                console.print(f"[cyan]📡 API: {self.api_url}[/cyan]")
+                console.print(f"[cyan]⏱️  Intervalo: {self.poll_interval}s[/cyan]")
+                console.print("=" * 60)
+                console.print("\n[green]✅ Agente iniciado. Presiona Ctrl+C para detener.[/green]\n")
             except Exception as e:
-                console.print(f"[red]❌ Error inesperado: {e}[/red]")
-                time.sleep(self.poll_interval)
+                # Fallback si rich console falla
+                print(f"AGENTE INICIADO - v{Settings.VERSION}")
+                print(f"Error en rich console: {e}")
+            
+            while True:
+                try:
+                    # Verificar actualizaciones cada 24 horas
+                    self.verificar_actualizaciones_periodicas()
+                    
+                    # Reiniciar Hero-SMS cada 2 horas (solo si no está corriendo el rotador)
+                    self.auto_restart_herosms_periodicamente()
+                    
+                    # Enviar estado
+                    self.send_heartbeat()
+                    
+                    # Consultar comandos
+                    self.poll_commands()
+                    
+                    # Esperar antes de la siguiente iteración
+                    time.sleep(self.poll_interval)
+                
+                except KeyboardInterrupt:
+                    try:
+                        console.print("\n\n[yellow]👋 Agente detenido por el usuario[/yellow]")
+                    except:
+                        print("\nAgente detenido por el usuario")
+                    break
+                except Exception as e:
+                    try:
+                        console.print(f"[red]❌ Error inesperado: {e}[/red]")
+                    except:
+                        print(f"Error inesperado: {e}")
+                    time.sleep(self.poll_interval)
+        except Exception as e:
+            # Error crítico en la inicialización
+            try:
+                with open("agente_error.log", "a", encoding="utf-8") as f:
+                    f.write(f"\n[{datetime.now()}] ERROR CRÍTICO AL INICIAR AGENTE:\n")
+                    f.write(f"{str(e)}\n")
+                    import traceback
+                    f.write(traceback.format_exc())
+            except:
+                pass
+            raise
 
 def instalar_servicio_windows():
     """Instala el agente como servicio de Windows usando NSSM"""
@@ -2976,17 +3000,40 @@ def instalar_servicio_windows():
     result = subprocess.run([nssm_path, "start", "AgenteRotadorSimBank"], capture_output=True, text=True)
     
     if result.returncode == 0:
-        console.print("\n[bold green]✅ SERVICIO INSTALADO Y INICIADO EXITOSAMENTE[/bold green]\n")
-        console.print("[green]El agente ahora está corriendo como servicio de Windows.[/green]")
-        console.print("[green]Se iniciará automáticamente al encender el PC.[/green]\n")
-        console.print("[cyan]Comandos útiles:[/cyan]")
-        console.print(f"[dim]  - Ver estado: nssm status AgenteRotadorSimBank[/dim]")
-        console.print(f"[dim]  - Detener: nssm stop AgenteRotadorSimBank[/dim]")
-        console.print(f"[dim]  - Reiniciar: nssm restart AgenteRotadorSimBank[/dim]")
-        console.print(f"[dim]  - Desinstalar: nssm remove AgenteRotadorSimBank confirm[/dim]\n")
-        return True
+        # Esperar un momento y verificar el estado
+        time.sleep(3)
+        status_result = subprocess.run([nssm_path, "status", "AgenteRotadorSimBank"], capture_output=True, text=True)
+        
+        if "SERVICE_RUNNING" in status_result.stdout:
+            console.print("\n[bold green]✅ SERVICIO INSTALADO Y INICIADO EXITOSAMENTE[/bold green]\n")
+            console.print("[green]El agente ahora está corriendo como servicio de Windows.[/green]")
+            console.print("[green]Se iniciará automáticamente al encender el PC.[/green]\n")
+            console.print("[cyan]Comandos útiles:[/cyan]")
+            console.print(f"[dim]  - Ver estado: {nssm_path} status AgenteRotadorSimBank[/dim]")
+            console.print(f"[dim]  - Detener: {nssm_path} stop AgenteRotadorSimBank[/dim]")
+            console.print(f"[dim]  - Reiniciar: {nssm_path} restart AgenteRotadorSimBank[/dim]")
+            console.print(f"[dim]  - Desinstalar: {nssm_path} remove AgenteRotadorSimBank confirm[/dim]")
+            console.print(f"[dim]  - Ver logs: type agente_stdout.log[/dim]\n")
+            return True
+        elif "SERVICE_PAUSED" in status_result.stdout:
+            console.print(f"[yellow]⚠️ El servicio está en estado PAUSED[/yellow]")
+            console.print(f"[yellow]Esto suele significar que el script falló al iniciar.[/yellow]\n")
+            console.print(f"[cyan]Diagnóstico:[/cyan]")
+            console.print(f"[dim]1. Verifica los logs: type agente_stdout.log[/dim]")
+            console.print(f"[dim]2. Verifica errores: type agente_stderr.log[/dim]")
+            console.print(f"[dim]3. Prueba manualmente: python RotadorSimBank.py --agente[/dim]")
+            console.print(f"[dim]4. Reinicia el servicio: {nssm_path} restart AgenteRotadorSimBank[/dim]\n")
+            return False
+        else:
+            console.print(f"[yellow]⚠️ Estado del servicio: {status_result.stdout}[/yellow]")
+            console.print(f"[yellow]El servicio no está en ejecución normal.[/yellow]\n")
+            return False
     else:
         console.print(f"[red]❌ Error iniciando servicio: {result.stderr}[/red]")
+        console.print(f"\n[cyan]Intenta:[/cyan]")
+        console.print(f"[dim]1. Ejecutar como Administrador[/dim]")
+        console.print(f"[dim]2. Probar manualmente: python RotadorSimBank.py --agente[/dim]")
+        console.print(f"[dim]3. Verificar que todas las dependencias estén instaladas[/dim]\n")
         return False
 
 if __name__ == "__main__":

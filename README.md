@@ -185,12 +185,28 @@ O usa: `python -m pip install ...` en lugar de `pip install ...`
 
 **Solución:** `INSTALAR.bat` ya maneja este error automáticamente usando PowerShell. Si falla, descarga manualmente desde https://nssm.cc/release/nssm-2.24.zip
 
+### El servicio está en estado PAUSED o no inicia
+
+**Solución:**
+1. **Ejecuta el script de diagnóstico:** `DIAGNOSTICO_SERVICIO.bat`
+2. **Prueba manualmente:** `python RotadorSimBank.py --agente`
+3. **Verifica los logs:**
+   - `type agente_stdout.log` (salida estándar)
+   - `type agente_stderr.log` (errores)
+   - `type agente_error.log` (errores críticos)
+4. **Reinstala el servicio:**
+   ```bash
+   nssm remove AgenteRotadorSimBank confirm
+   python RotadorSimBank.py --instalar-servicio
+   ```
+
 ### El agente no aparece en el dashboard
 
 **Solución:**
 1. Verifica que el servicio esté corriendo: `nssm status AgenteRotadorSimBank`
 2. Verifica los logs: `type agente_stdout.log`
 3. Reinicia el servicio: `nssm restart AgenteRotadorSimBank`
+4. Ejecuta diagnóstico completo: `DIAGNOSTICO_SERVICIO.bat`
 
 ---
 

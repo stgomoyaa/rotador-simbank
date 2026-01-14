@@ -39,6 +39,7 @@ nssm.zip
 # Logs del agente
 agente_stdout.log
 agente_stderr.log
+agente_error.log
 
 # Archivos temporales de actualización
 *.backup
