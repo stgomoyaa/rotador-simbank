@@ -64,7 +64,18 @@ Detiene el script RotadorSimBank.py
 }
 ```
 
-### 7. `update`
+### 7. `restart_agent` ⭐ NUEVO
+Reinicia el servicio del agente de control remoto
+```json
+{
+  "machine_id": "BEELINK-01",
+  "action": "command",
+  "command": "restart_agent"
+}
+```
+**Nota:** Útil si el agente necesita reiniciarse después de una actualización o si no responde correctamente.
+
+### 8. `update`
 Fuerza la actualización del script RotadorSimBank.py a la última versión
 ```json
 {
@@ -74,7 +85,7 @@ Fuerza la actualización del script RotadorSimBank.py a la última versión
 }
 ```
 
-### 8. `get_logs`
+### 9. `get_logs`
 Obtiene las últimas 100 líneas del log principal del rotador
 ```json
 {
@@ -92,7 +103,7 @@ Obtiene las últimas 100 líneas del log principal del rotador
 }
 ```
 
-### 9. `get_activation_logs`
+### 10. `get_activation_logs`
 Obtiene las últimas 100 líneas del log de activación de SIMs
 ```json
 {
@@ -110,7 +121,7 @@ Obtiene las últimas 100 líneas del log de activación de SIMs
 }
 ```
 
-### 10. `get_agent_logs`
+### 11. `get_agent_logs`
 Obtiene las últimas 50 líneas del log del agente
 ```json
 {
@@ -128,7 +139,7 @@ Obtiene las últimas 50 líneas del log del agente
 }
 ```
 
-### 11. `set_name:Nombre` ⭐ NUEVO
+### 12. `set_name:Nombre`
 Cambia el nombre personalizado de la máquina (solo para el dashboard, no en el sistema)
 ```json
 {
@@ -147,7 +158,7 @@ Cambia el nombre personalizado de la máquina (solo para el dashboard, no en el 
 
 **Nota:** El formato del comando es `set_name:` seguido del nombre deseado. El nombre se guardará en `machine_config.json` y se enviará en cada heartbeat.
 
-### 12. `take_screenshot` ⭐ NUEVO
+### 13. `take_screenshot`
 Captura la pantalla de la máquina y la retorna en base64
 ```json
 {
@@ -266,6 +277,7 @@ O si está detenido:
 | `start_rotador` | **Inicia el rotador** | ✅ | ⭐ |
 | `restart_rotador` | Reinicia el rotador | ✅ | |
 | `stop_rotador` | Detiene el rotador | ✅ | |
+| `restart_agent` | **Reinicia el agente** | ✅ | ⭐ |
 | `update` | Actualiza el script | ✅ | |
 | `get_logs` | Lee log principal | ✅ | |
 | `get_activation_logs` | Lee log de activación | ✅ | |

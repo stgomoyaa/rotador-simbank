@@ -157,6 +157,7 @@ python RotadorSimBank.py --update
 | `start_rotador` | **Inicia el rotador** | ⭐ |
 | `restart_rotador` | Reinicia el script RotadorSimBank.py | |
 | `stop_rotador` | Detiene el script RotadorSimBank.py | |
+| `restart_agent` | **Reinicia el servicio del agente** | ⭐ |
 | `update` | Fuerza actualización del script | |
 | `get_logs` | Lee log principal | |
 | `get_activation_logs` | Lee log de activación | |

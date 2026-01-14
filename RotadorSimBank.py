@@ -65,7 +65,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.10.0"  # Custom machine names + Start commands + Screenshots
+    VERSION = "2.10.1"  # Fixed agent auto-restart after updates
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -656,7 +656,22 @@ def descargar_actualizacion(url: str) -> bool:
         # Reiniciar el script (maneja rutas con espacios correctamente)
         time.sleep(2)
         
-        # Usar subprocess para manejar rutas con espacios
+        # Si estamos corriendo como agente (servicio), reiniciar el servicio NSSM
+        if "--agente" in sys.argv:
+            try:
+                console.print("[cyan]📦 Detectado modo agente - Reiniciando servicio NSSM...[/cyan]")
+                nssm_path = os.path.join(os.getcwd(), "nssm.exe")
+                if os.path.exists(nssm_path):
+                    # Reiniciar el servicio NSSM
+                    subprocess.Popen([nssm_path, "restart", "AgenteRotadorSimBank"])
+                    time.sleep(2)
+                    sys.exit(0)
+                else:
+                    console.print("[yellow]⚠️  NSSM no encontrado - Reiniciando proceso Python directamente[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]⚠️  Error reiniciando servicio: {e}[/yellow]")
+        
+        # Fallback: reiniciar proceso Python directamente
         import subprocess
         subprocess.Popen([sys.executable] + sys.argv)
         sys.exit(0)
@@ -2695,6 +2710,19 @@ class AgenteControlRemoto:
                     creationflags=subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0
                 )
                 return {"success": True, "message": "RotadorSimBank reiniciado"}
+            
+            elif command == "restart_agent":
+                console.print("[yellow]🔄 Ejecutando: Reiniciar Agente[/yellow]")
+                try:
+                    nssm_path = os.path.join(os.getcwd(), "nssm.exe")
+                    if os.path.exists(nssm_path):
+                        subprocess.run([nssm_path, "restart", "AgenteRotadorSimBank"], 
+                                     capture_output=True, timeout=10)
+                        return {"success": True, "message": "Agente reiniciándose..."}
+                    else:
+                        return {"success": False, "message": "NSSM no encontrado"}
+                except Exception as e:
+                    return {"success": False, "message": f"Error al reiniciar agente: {str(e)}"}
             
             elif command == "stop_rotador":
                 console.print("[yellow]🛑 Ejecutando: Detener Rotador[/yellow]")
