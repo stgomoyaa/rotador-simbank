@@ -14,7 +14,17 @@ Reinicia la PC del servidor
 }
 ```
 
-### 2. `restart_herosms`
+### 2. `start_herosms` ⭐ NUEVO
+Inicia HeroSMS-Partners (si no está corriendo)
+```json
+{
+  "machine_id": "BEELINK-01",
+  "action": "command",
+  "command": "start_herosms"
+}
+```
+
+### 3. `restart_herosms`
 Reinicia la aplicación HeroSMS-Partners
 ```json
 {
@@ -24,7 +34,17 @@ Reinicia la aplicación HeroSMS-Partners
 }
 ```
 
-### 3. `restart_rotador`
+### 4. `start_rotador` ⭐ NUEVO
+Inicia el script RotadorSimBank.py (si no está corriendo)
+```json
+{
+  "machine_id": "BEELINK-01",
+  "action": "command",
+  "command": "start_rotador"
+}
+```
+
+### 5. `restart_rotador`
 Reinicia el script RotadorSimBank.py
 ```json
 {
@@ -34,7 +54,7 @@ Reinicia el script RotadorSimBank.py
 }
 ```
 
-### 4. `stop_rotador`
+### 6. `stop_rotador`
 Detiene el script RotadorSimBank.py
 ```json
 {
@@ -44,7 +64,7 @@ Detiene el script RotadorSimBank.py
 }
 ```
 
-### 5. `update` ⭐
+### 7. `update`
 Fuerza la actualización del script RotadorSimBank.py a la última versión
 ```json
 {
@@ -54,7 +74,7 @@ Fuerza la actualización del script RotadorSimBank.py a la última versión
 }
 ```
 
-### 6. `get_logs` ⭐ NUEVO
+### 8. `get_logs`
 Obtiene las últimas 100 líneas del log principal del rotador
 ```json
 {
@@ -72,7 +92,7 @@ Obtiene las últimas 100 líneas del log principal del rotador
 }
 ```
 
-### 7. `get_activation_logs` ⭐ NUEVO
+### 9. `get_activation_logs`
 Obtiene las últimas 100 líneas del log de activación de SIMs
 ```json
 {
@@ -90,7 +110,7 @@ Obtiene las últimas 100 líneas del log de activación de SIMs
 }
 ```
 
-### 8. `get_agent_logs` ⭐ NUEVO
+### 10. `get_agent_logs`
 Obtiene las últimas 50 líneas del log del agente
 ```json
 {
@@ -107,6 +127,50 @@ Obtiene las últimas 50 líneas del log del agente
   "file": "agente_stdout.log"
 }
 ```
+
+### 11. `set_name:Nombre` ⭐ NUEVO
+Cambia el nombre personalizado de la máquina (solo para el dashboard, no en el sistema)
+```json
+{
+  "machine_id": "BEELINK-01",
+  "action": "command",
+  "command": "set_name:Servidor Pool 1"
+}
+```
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "Nombre cambiado a: Servidor Pool 1"
+}
+```
+
+**Nota:** El formato del comando es `set_name:` seguido del nombre deseado. El nombre se guardará en `machine_config.json` y se enviará en cada heartbeat.
+
+### 12. `take_screenshot` ⭐ NUEVO
+Captura la pantalla de la máquina y la retorna en base64
+```json
+{
+  "machine_id": "BEELINK-01",
+  "action": "command",
+  "command": "take_screenshot"
+}
+```
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "Captura de pantalla realizada",
+  "screenshot": "data:image/jpeg;base64,/9j/4AAQSkZJRg...",
+  "format": "jpeg"
+}
+```
+
+**Notas sobre capturas:**
+- La imagen se redimensiona automáticamente a max 1280px de ancho
+- Se comprime en JPEG con calidad 75% para reducir tamaño
+- Se codifica en base64 para transmisión
+- Tamaño aproximado: 100-300 KB por captura
 
 ---
 
@@ -194,16 +258,20 @@ O si está detenido:
 
 ## 📋 Resumen de Comandos Disponibles
 
-| Comando | Descripción | Desde API | Nuevo |
-|---------|-------------|-----------|-------|
+| Comando | Descripción | Desde API | Nuevo v2.10.0 |
+|---------|-------------|-----------|---------------|
 | `restart_pc` | Reinicia la PC | ✅ | |
+| `start_herosms` | **Inicia HeroSMS** | ✅ | ⭐ |
 | `restart_herosms` | Reinicia HeroSMS | ✅ | |
+| `start_rotador` | **Inicia el rotador** | ✅ | ⭐ |
 | `restart_rotador` | Reinicia el rotador | ✅ | |
 | `stop_rotador` | Detiene el rotador | ✅ | |
 | `update` | Actualiza el script | ✅ | |
-| `get_logs` | **Lee log principal** | ✅ | ⭐ |
-| `get_activation_logs` | **Lee log de activación** | ✅ | ⭐ |
-| `get_agent_logs` | **Lee log del agente** | ✅ | ⭐ |
+| `get_logs` | Lee log principal | ✅ | |
+| `get_activation_logs` | Lee log de activación | ✅ | |
+| `get_agent_logs` | Lee log del agente | ✅ | |
+| `set_name:Nombre` | **Cambia nombre de máquina** | ✅ | ⭐ |
+| `take_screenshot` | **Captura de pantalla** | ✅ | ⭐ |
 
 ---
 
@@ -282,6 +350,10 @@ export default function Dashboard() {
   const [machines, setMachines] = useState([])
   const [logs, setLogs] = useState({})
   const [showLogs, setShowLogs] = useState({})
+  const [screenshots, setScreenshots] = useState({})
+  const [showScreenshot, setShowScreenshot] = useState({})
+  const [renamingMachine, setRenamingMachine] = useState(null)
+  const [newName, setNewName] = useState("")
 
   // Función para enviar comandos
   const sendCommand = async (machineId, command) => {
@@ -302,12 +374,20 @@ export default function Dashboard() {
       const data = await response.json()
       
       if (data.success) {
-        alert(`✅ ${data.message}`)
-        
+        // Si es captura de pantalla, mostrarla
+        if (data.screenshot) {
+          const img = `data:image/${data.format};base64,${data.screenshot}`
+          setScreenshots(prev => ({ ...prev, [machineId]: img }))
+          setShowScreenshot(prev => ({ ...prev, [machineId]: true }))
+        }
         // Si es comando de logs, mostrarlos
-        if (data.logs) {
+        else if (data.logs) {
           setLogs(prev => ({ ...prev, [machineId]: data.logs }))
           setShowLogs(prev => ({ ...prev, [machineId]: true }))
+        }
+        // Otros comandos
+        else {
+          alert(`✅ ${data.message}`)
         }
       } else {
         alert(`❌ Error: ${data.message}`)
@@ -315,6 +395,19 @@ export default function Dashboard() {
     } catch (error) {
       alert(`❌ Error: ${error.message}`)
     }
+  }
+  
+  // Función para cambiar nombre
+  const handleRename = async (machineId) => {
+    if (!newName.trim()) {
+      alert("El nombre no puede estar vacío")
+      return
+    }
+    await sendCommand(machineId, `set_name:${newName}`)
+    setRenamingMachine(null)
+    setNewName("")
+    // Refrescar lista de máquinas
+    // fetchMachines()
   }
 
   return (
@@ -325,7 +418,47 @@ export default function Dashboard() {
         <div key={machine.id} className="bg-white shadow rounded-lg p-4 mb-4">
           {/* Header */}
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">{machine.id}</h2>
+            <div>
+              <h2 className="text-xl font-semibold">
+                {machine.machine_info?.custom_name || machine.id}
+                {machine.machine_info?.custom_name !== machine.id && (
+                  <span className="text-xs text-gray-500 ml-2">({machine.id})</span>
+                )}
+              </h2>
+              {renamingMachine === machine.id ? (
+                <div className="mt-2 flex gap-2">
+                  <input 
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Nuevo nombre"
+                    className="px-2 py-1 border rounded text-sm"
+                  />
+                  <button 
+                    onClick={() => handleRename(machine.id)}
+                    className="px-3 py-1 bg-green-500 text-white text-sm rounded"
+                  >
+                    ✓ Guardar
+                  </button>
+                  <button 
+                    onClick={() => setRenamingMachine(null)}
+                    className="px-3 py-1 bg-gray-400 text-white text-sm rounded"
+                  >
+                    ✕ Cancelar
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => {
+                    setRenamingMachine(machine.id)
+                    setNewName(machine.machine_info?.custom_name || machine.id)
+                  }}
+                  className="mt-1 text-xs text-blue-500 hover:text-blue-700"
+                >
+                  ✏️  Cambiar nombre
+                </button>
+              )}
+            </div>
             <div className="text-sm text-gray-500">
               CPU: {machine.system?.cpu_percent}% | RAM: {machine.system?.memory_percent}%
             </div>
@@ -360,15 +493,25 @@ export default function Dashboard() {
           </div>
           
           {/* Botones de Control */}
-          <div className="mb-4 space-x-2 space-y-2">
+          <div className="mb-4 flex flex-wrap gap-2">
             <button onClick={() => sendCommand(machine.id, 'restart_pc')} 
                     className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition">
               🔄 Reiniciar PC
             </button>
             
+            <button onClick={() => sendCommand(machine.id, 'start_herosms')} 
+                    className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition">
+              🟢 Iniciar Hero-SMS
+            </button>
+            
             <button onClick={() => sendCommand(machine.id, 'restart_herosms')} 
                     className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 transition">
               🔄 Reiniciar Hero-SMS
+            </button>
+            
+            <button onClick={() => sendCommand(machine.id, 'start_rotador')} 
+                    className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition">
+              🟢 Iniciar Rotador
             </button>
             
             <button onClick={() => sendCommand(machine.id, 'restart_rotador')} 
@@ -384,6 +527,11 @@ export default function Dashboard() {
             <button onClick={() => sendCommand(machine.id, 'update')} 
                     className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition">
               📥 Actualizar Script
+            </button>
+            
+            <button onClick={() => sendCommand(machine.id, 'take_screenshot')} 
+                    className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition">
+              📸 Captura de Pantalla
             </button>
           </div>
           
@@ -407,7 +555,7 @@ export default function Dashboard() {
           
           {/* Mostrar Logs */}
           {showLogs[machine.id] && logs[machine.id] && (
-            <div className="mt-4 p-3 bg-black text-green-400 rounded font-mono text-xs overflow-x-auto">
+            <div className="mt-4 p-3 bg-black text-green-400 rounded font-mono text-xs overflow-x-auto max-h-96">
               <div className="flex justify-between items-center mb-2">
                 <span className="font-bold">📋 Logs:</span>
                 <button 
@@ -418,6 +566,39 @@ export default function Dashboard() {
                 </button>
               </div>
               <pre className="whitespace-pre-wrap">{logs[machine.id]}</pre>
+            </div>
+          )}
+          
+          {/* Mostrar Captura de Pantalla ⭐ NUEVO */}
+          {showScreenshot[machine.id] && screenshots[machine.id] && (
+            <div className="mt-4 p-3 bg-gray-100 rounded">
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-bold">📸 Captura de Pantalla:</span>
+                <div className="flex gap-2">
+                  <a 
+                    href={screenshots[machine.id]} 
+                    download={`screenshot-${machine.id}-${Date.now()}.jpg`}
+                    className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600"
+                  >
+                    💾 Descargar
+                  </a>
+                  <button 
+                    onClick={() => setShowScreenshot(prev => ({ ...prev, [machine.id]: false }))}
+                    className="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600"
+                  >
+                    ✕ Cerrar
+                  </button>
+                </div>
+              </div>
+              <img 
+                src={screenshots[machine.id]} 
+                alt="Screenshot" 
+                className="w-full rounded shadow-lg cursor-pointer"
+                onClick={() => window.open(screenshots[machine.id], '_blank')}
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Click en la imagen para verla en tamaño completo
+              </p>
             </div>
           )}
         </div>

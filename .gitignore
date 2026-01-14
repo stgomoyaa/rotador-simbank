@@ -30,6 +30,7 @@ Ejemplos simbank/
 
 # Configuración detectada automáticamente
 simbanks_config.json
+machine_config.json
 
 # NSSM (se descarga automáticamente)
 nssm.exe

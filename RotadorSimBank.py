@@ -50,13 +50,22 @@ except ImportError:
     import requests
     import psutil
 
+try:
+    from PIL import ImageGrab, Image
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"])
+    from PIL import ImageGrab, Image
+
+import base64
+from io import BytesIO
+
 console = Console()
 
 # ==================== CONFIGURACIÓN ====================
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.9.1"  # Fixed service installation and improved error handling
+    VERSION = "2.10.0"  # Custom machine names + Start commands + Screenshots
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2505,7 +2514,58 @@ class AgenteControlRemoto:
         self.rotador_script = os.path.abspath(__file__)
         self.ultima_verificacion_actualizacion = time.time()
         self.ultimo_reinicio_herosms = time.time()  # Timer para reinicio automático cada 2h
+        self.machine_config_file = "machine_config.json"
+        self.custom_name = self.load_custom_name()
         
+    def load_custom_name(self):
+        """Carga el nombre personalizado de la máquina desde archivo"""
+        try:
+            if os.path.exists(self.machine_config_file):
+                with open(self.machine_config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    return config.get("custom_name", self.machine_id)
+        except:
+            pass
+        return self.machine_id
+    
+    def save_custom_name(self, name: str):
+        """Guarda el nombre personalizado de la máquina"""
+        try:
+            config = {"custom_name": name, "original_hostname": self.machine_id}
+            with open(self.machine_config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            self.custom_name = name
+            return True
+        except Exception as e:
+            console.print(f"[red]❌ Error guardando nombre: {e}[/red]")
+            return False
+    
+    def take_screenshot(self):
+        """Toma una captura de pantalla y la retorna en base64"""
+        try:
+            # Capturar pantalla
+            screenshot = ImageGrab.grab()
+            
+            # Redimensionar para reducir tamaño (max 1280px de ancho)
+            max_width = 1280
+            if screenshot.width > max_width:
+                ratio = max_width / screenshot.width
+                new_size = (max_width, int(screenshot.height * ratio))
+                screenshot = screenshot.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # Convertir a JPEG y comprimir
+            buffer = BytesIO()
+            screenshot.save(buffer, format='JPEG', quality=75, optimize=True)
+            buffer.seek(0)
+            
+            # Codificar en base64
+            img_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            
+            return img_base64
+        except Exception as e:
+            console.print(f"[red]❌ Error capturando pantalla: {e}[/red]")
+            return None
+    
     def get_system_status(self):
         """Obtiene el estado del sistema"""
         return {
@@ -2572,6 +2632,22 @@ class AgenteControlRemoto:
                 subprocess.Popen(["shutdown", "/r", "/t", "10"])
                 return {"success": True, "message": "PC reiniciándose en 10s"}
             
+            elif command == "start_herosms":
+                console.print("[yellow]🟢 Ejecutando: Iniciar Hero-SMS[/yellow]")
+                # Verificar si ya está corriendo
+                herosms_status = self.check_service_status("HeroSMS-Partners.exe")
+                if herosms_status["status"] == "running":
+                    return {"success": False, "message": "Hero-SMS ya está corriendo"}
+                
+                # Iniciar Hero-SMS
+                user = os.environ.get("USERNAME", "")
+                shortcut_path = f"C:\\Users\\{user}\\Desktop\\HeroSMS-Partners.lnk"
+                if os.path.exists(shortcut_path):
+                    os.startfile(shortcut_path)
+                    return {"success": True, "message": "Hero-SMS iniciado"}
+                else:
+                    return {"success": False, "message": f"No se encontró Hero-SMS en: {shortcut_path}"}
+            
             elif command == "restart_herosms":
                 console.print("[yellow]🔄 Ejecutando: Reiniciar Hero-SMS[/yellow]")
                 subprocess.run(["taskkill", "/F", "/IM", "HeroSMS-Partners.exe"], 
@@ -2584,6 +2660,19 @@ class AgenteControlRemoto:
                     return {"success": True, "message": "Hero-SMS reiniciado"}
                 else:
                     return {"success": False, "message": f"No se encontró Hero-SMS en: {shortcut_path}"}
+            
+            elif command == "start_rotador":
+                console.print("[yellow]🟢 Ejecutando: Iniciar Rotador[/yellow]")
+                # Verificar si ya está corriendo
+                if self.is_rotador_running():
+                    return {"success": False, "message": "RotadorSimBank ya está corriendo"}
+                
+                # Iniciar nuevo proceso
+                subprocess.Popen(
+                    [sys.executable, self.rotador_script],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0
+                )
+                return {"success": True, "message": "RotadorSimBank iniciado"}
             
             elif command == "restart_rotador":
                 console.print("[yellow]🔄 Ejecutando: Reiniciar Rotador[/yellow]")
@@ -2666,6 +2755,39 @@ class AgenteControlRemoto:
                     return {"success": True, "logs": log_content, "file": "agente_stdout.log"}
                 except Exception as e:
                     return {"success": False, "message": f"Error leyendo logs: {str(e)}"}
+            
+            elif command.startswith("set_name:"):
+                console.print("[yellow]✏️  Ejecutando: Cambiar Nombre de Máquina[/yellow]")
+                try:
+                    # Extraer el nombre del comando (formato: "set_name:Nuevo Nombre")
+                    new_name = command.split(":", 1)[1].strip()
+                    if not new_name:
+                        return {"success": False, "message": "El nombre no puede estar vacío"}
+                    
+                    if self.save_custom_name(new_name):
+                        console.print(f"[green]✅ Nombre cambiado a: {new_name}[/green]")
+                        return {"success": True, "message": f"Nombre cambiado a: {new_name}"}
+                    else:
+                        return {"success": False, "message": "Error al guardar el nombre"}
+                except Exception as e:
+                    return {"success": False, "message": f"Error al cambiar nombre: {str(e)}"}
+            
+            elif command == "take_screenshot":
+                console.print("[yellow]📸 Ejecutando: Captura de Pantalla[/yellow]")
+                try:
+                    screenshot_base64 = self.take_screenshot()
+                    if screenshot_base64:
+                        console.print(f"[green]✅ Captura realizada ({len(screenshot_base64)} bytes)[/green]")
+                        return {
+                            "success": True, 
+                            "message": "Captura de pantalla realizada",
+                            "screenshot": screenshot_base64,
+                            "format": "jpeg"
+                        }
+                    else:
+                        return {"success": False, "message": "Error al capturar pantalla"}
+                except Exception as e:
+                    return {"success": False, "message": f"Error al capturar: {str(e)}"}
             
             else:
                 return {"success": False, "message": f"Comando desconocido: {command}"}
@@ -2783,6 +2905,10 @@ class AgenteControlRemoto:
             "timers": {
                 "next_update_check": int(24 - ((time.time() - self.ultima_verificacion_actualizacion) / 3600)),
                 "next_herosms_restart": int(2 - ((time.time() - self.ultimo_reinicio_herosms) / 3600))
+            },
+            "machine_info": {
+                "custom_name": self.custom_name,
+                "original_hostname": self.machine_id
             }
         }
         
@@ -2792,7 +2918,8 @@ class AgenteControlRemoto:
                 json={
                     "machine_id": self.machine_id,
                     "action": "heartbeat",
-                    "status": status
+                    "status": status,
+                    "custom_name": self.custom_name  # Enviar también en el nivel superior
                 },
                 headers={"Authorization": f"Bearer {self.auth_token}"},
                 timeout=10
@@ -2800,7 +2927,7 @@ class AgenteControlRemoto:
             if response.status_code == 200:
                 herosms_display = herosms_status.get("display", "❓ Unknown")
                 rotador_display = "✅ Running" if rotador_running else "❌ Stopped"
-                console.print(f"[dim]💓 Heartbeat - CPU: {status['system']['cpu_percent']}% | Hero-SMS: {herosms_display} | Rotador: {rotador_display}[/dim]")
+                console.print(f"[dim]💓 Heartbeat [{self.custom_name}] - CPU: {status['system']['cpu_percent']}% | Hero-SMS: {herosms_display} | Rotador: {rotador_display}[/dim]")
         except Exception as e:
             console.print(f"[red]❌ Error enviando heartbeat: {e}[/red]")
     

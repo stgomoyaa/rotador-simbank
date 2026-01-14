@@ -145,6 +145,50 @@ python RotadorSimBank.py --update
 
 ---
 
+## 📱 Control Remoto desde Dashboard
+
+### Comandos Disponibles (v2.10.0)
+
+| Comando | Descripción | Nuevo |
+|---------|-------------|-------|
+| `restart_pc` | Reinicia la PC | |
+| `start_herosms` | **Inicia HeroSMS-Partners** | ⭐ |
+| `restart_herosms` | Reinicia HeroSMS-Partners | |
+| `start_rotador` | **Inicia el rotador** | ⭐ |
+| `restart_rotador` | Reinicia el script RotadorSimBank.py | |
+| `stop_rotador` | Detiene el script RotadorSimBank.py | |
+| `update` | Fuerza actualización del script | |
+| `get_logs` | Lee log principal | |
+| `get_activation_logs` | Lee log de activación | |
+| `get_agent_logs` | Lee log del agente | |
+| `set_name:Nombre` | **Cambia nombre de la máquina** | ⭐ |
+| `take_screenshot` | **Captura de pantalla** | ⭐ |
+
+### Funcionalidades Nuevas v2.10.0
+
+#### 🏷️  Nombres Personalizados
+- Cambia el nombre de visualización de cada máquina en el dashboard
+- El nombre se guarda localmente en `machine_config.json`
+- No afecta el hostname del sistema
+- Útil para identificar: "Servidor Pool 1", "Servidor Pool 2", etc.
+
+#### 🟢 Comandos de Inicio
+- `start_herosms`: Abre HeroSMS-Partners si no está corriendo
+- `start_rotador`: Inicia el rotador si no está activo
+- Útil después de reiniciar la PC o detener servicios manualmente
+
+#### 📸 Capturas de Pantalla
+- Captura la pantalla completa de la máquina remota
+- Se redimensiona automáticamente a max 1280px de ancho
+- Comprimida en JPEG (75% calidad) para transmisión rápida
+- Visualiza y descarga desde el dashboard
+
+**Dashboard:** https://claro-pool-dashboard.vercel.app
+
+**Documentación completa:** [`DASHBOARD_API.md`](DASHBOARD_API.md)
+
+---
+
 ## 📂 Archivos Generados
 
 Después de ejecutar, el script crea automáticamente:
@@ -154,8 +198,10 @@ Después de ejecutar, el script crea automáticamente:
 ├── RotadorSimBank.py
 ├── INSTALAR.bat
 ├── EJECUTAR.bat
+├── DIAGNOSTICO_SERVICIO.bat          ← Diagnóstico del servicio
 ├── nssm.exe                          ← Auto-descargado
 ├── simbanks_config.json              ← Auto-detectado
+├── machine_config.json               ← Nombre personalizado (v2.10.0)
 ├── rotador_state.json                ← Estado persistente
 ├── rotador_metrics.json              ← Métricas
 ├── rotador_simbank.log               ← Log principal
