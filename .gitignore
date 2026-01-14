@@ -31,6 +31,15 @@ Ejemplos simbank/
 # Configuración detectada automáticamente
 simbanks_config.json
 
+# NSSM (se descarga automáticamente)
+nssm.exe
+nssm-2.24/
+nssm.zip
+
+# Logs del agente
+agente_stdout.log
+agente_stderr.log
+
 # Archivos temporales de actualización
 *.backup
 *.new
