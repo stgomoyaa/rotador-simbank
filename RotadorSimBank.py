@@ -55,7 +55,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.8.1"  # Fixed SSL certificate error when downloading NSSM
+    VERSION = "2.8.2"  # Auto-check updates every 24h + Force update via API
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2502,6 +2502,7 @@ class AgenteControlRemoto:
         self.machine_id = platform.node()
         self.poll_interval = Settings.AGENTE_POLL_INTERVAL
         self.rotador_script = os.path.abspath(__file__)
+        self.ultima_verificacion_actualizacion = time.time()
         
     def get_system_status(self):
         """Obtiene el estado del sistema"""
@@ -2584,11 +2585,51 @@ class AgenteControlRemoto:
                 
                 return {"success": True, "message": "RotadorSimBank detenido"}
             
+            elif command == "update":
+                console.print("[yellow]📥 Ejecutando: Actualizar Script[/yellow]")
+                try:
+                    hay_actualizacion, version_remota = verificar_actualizacion()
+                    if hay_actualizacion:
+                        console.print(f"[green]🆕 Actualizando a v{version_remota}...[/green]")
+                        if actualizar_script():
+                            return {"success": True, "message": f"Actualizado a v{version_remota}. Reiniciando..."}
+                        else:
+                            return {"success": False, "message": "Error al descargar la actualización"}
+                    else:
+                        return {"success": True, "message": f"Ya estás en la última versión (v{Settings.VERSION})"}
+                except Exception as e:
+                    return {"success": False, "message": f"Error al actualizar: {str(e)}"}
+            
             else:
                 return {"success": False, "message": f"Comando desconocido: {command}"}
         
         except Exception as e:
             return {"success": False, "message": str(e)}
+    
+    def verificar_actualizaciones_periodicas(self):
+        """Verifica actualizaciones cada 24 horas automáticamente"""
+        tiempo_transcurrido = time.time() - self.ultima_verificacion_actualizacion
+        horas_transcurridas = tiempo_transcurrido / 3600
+        
+        if horas_transcurridas >= 24:
+            console.print(f"\n[cyan]🔍 Han pasado {int(horas_transcurridas)} horas. Verificando actualizaciones...[/cyan]")
+            try:
+                hay_actualizacion, version_remota = verificar_actualizacion()
+                if hay_actualizacion:
+                    console.print(f"[bold green]🆕 ¡Nueva versión disponible: v{version_remota}![/bold green]")
+                    console.print(f"[yellow]📥 Actualizando automáticamente...[/yellow]")
+                    if actualizar_script():
+                        console.print(f"[green]✅ Actualizado exitosamente a v{version_remota}[/green]")
+                        # El script se reiniciará automáticamente por actualizar_script()
+                    else:
+                        console.print(f"[red]❌ Error al descargar la actualización[/red]")
+                else:
+                    console.print(f"[green]✅ Ya estás usando la última versión (v{Settings.VERSION})[/green]")
+                
+                self.ultima_verificacion_actualizacion = time.time()
+            except Exception as e:
+                console.print(f"[red]❌ Error verificando actualizaciones: {e}[/red]")
+                self.ultima_verificacion_actualizacion = time.time()
     
     def send_heartbeat(self):
         """Envía el estado del sistema al dashboard"""
@@ -2672,6 +2713,9 @@ class AgenteControlRemoto:
         
         while True:
             try:
+                # Verificar actualizaciones cada 24 horas
+                self.verificar_actualizaciones_periodicas()
+                
                 # Enviar estado
                 self.send_heartbeat()
                 

@@ -66,6 +66,7 @@ Desde el dashboard puedes:
 - 📊 Ver todas las máquinas conectadas en tiempo real
 - 🔄 Reiniciar PC / Hero-SMS / Rotador
 - 🛑 Detener servicios
+- 📥 Forzar actualización del script
 - 📈 Ver CPU, RAM, uptime
 - 📜 Ver historial de comandos
 
@@ -74,6 +75,8 @@ Desde el dashboard puedes:
 - ✅ Corre 24/7 como servicio de Windows
 - ✅ Se inicia automáticamente al encender el PC
 - ✅ Reporta estado cada 10 segundos
+- ✅ Verifica actualizaciones cada 24 horas automáticamente
+- ✅ Permite forzar actualización desde el dashboard
 
 ---
 
