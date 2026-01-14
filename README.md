@@ -64,19 +64,24 @@ O simplemente ejecuta `EJECUTAR.bat` para un menú interactivo.
 
 Desde el dashboard puedes:
 - 📊 Ver todas las máquinas conectadas en tiempo real
+- 🏥 **Health check completo** (Hero-SMS: ✅/❌, Rotador: ✅/❌)
 - 🔄 Reiniciar PC / Hero-SMS / Rotador
 - 🛑 Detener servicios
 - 📥 Forzar actualización del script
-- 📈 Ver CPU, RAM, uptime
+- 📄 **Leer logs remotamente** (principal, activación, agente)
+- 📈 Ver CPU, RAM, uptime, timers
 - 📜 Ver historial de comandos
 
 ### El agente de control remoto:
 - ✅ Se instala automáticamente con `INSTALAR.bat`
 - ✅ Corre 24/7 como servicio de Windows
 - ✅ Se inicia automáticamente al encender el PC
-- ✅ Reporta estado cada 10 segundos
+- ✅ Reporta estado cada 10 segundos (CPU, RAM, servicios)
 - ✅ Verifica actualizaciones cada 24 horas automáticamente
 - ✅ Permite forzar actualización desde el dashboard
+- ✅ **Reinicia Hero-SMS cada 2 horas automáticamente** (solo si no está corriendo el rotador)
+- ✅ **Health check completo** (detecta si Hero-SMS y Rotador están corriendo)
+- ✅ **Lectura de logs remotos** desde el dashboard
 
 ---
 

@@ -27,6 +27,7 @@ import sys
 import ssl
 import urllib.request
 import shutil
+import platform
 from datetime import datetime
 from pathlib import Path
 from rich.console import Console
@@ -55,7 +56,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.8.2"  # Auto-check updates every 24h + Force update via API
+    VERSION = "2.9.0"  # Auto-restart Hero-SMS every 2h + Health check + Read logs from dashboard
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2503,6 +2504,7 @@ class AgenteControlRemoto:
         self.poll_interval = Settings.AGENTE_POLL_INTERVAL
         self.rotador_script = os.path.abspath(__file__)
         self.ultima_verificacion_actualizacion = time.time()
+        self.ultimo_reinicio_herosms = time.time()  # Timer para reinicio automático cada 2h
         
     def get_system_status(self):
         """Obtiene el estado del sistema"""
@@ -2513,16 +2515,54 @@ class AgenteControlRemoto:
         }
     
     def check_service_status(self, service_name):
-        """Verifica si un servicio está corriendo"""
+        """Verifica si un servicio está corriendo y devuelve información detallada"""
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {service_name}"],
                 capture_output=True,
                 text=True
             )
-            return "✅ Running" if service_name in result.stdout else "❌ Stopped"
-        except:
-            return "❓ Unknown"
+            
+            is_running = service_name in result.stdout
+            
+            # Obtener información adicional si está corriendo
+            if is_running:
+                # Contar procesos
+                count = result.stdout.count(service_name)
+                
+                # Obtener PID si es posible
+                lines = result.stdout.split('\n')
+                pids = []
+                for line in lines:
+                    if service_name in line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                pids.append(int(parts[1]))
+                            except:
+                                pass
+                
+                return {
+                    "status": "running",
+                    "display": "✅ Running",
+                    "count": count,
+                    "pids": pids
+                }
+            else:
+                return {
+                    "status": "stopped",
+                    "display": "❌ Stopped",
+                    "count": 0,
+                    "pids": []
+                }
+        except Exception as e:
+            return {
+                "status": "unknown",
+                "display": "❓ Unknown",
+                "error": str(e),
+                "count": 0,
+                "pids": []
+            }
     
     def execute_command(self, command):
         """Ejecuta un comando según el tipo"""
@@ -2600,11 +2640,106 @@ class AgenteControlRemoto:
                 except Exception as e:
                     return {"success": False, "message": f"Error al actualizar: {str(e)}"}
             
+            elif command == "get_logs":
+                console.print("[yellow]📄 Ejecutando: Obtener Logs[/yellow]")
+                try:
+                    # Leer últimas 100 líneas del log principal
+                    log_content = self.read_log_file(Settings.LOG_FILE, lines=100)
+                    return {"success": True, "logs": log_content, "file": Settings.LOG_FILE}
+                except Exception as e:
+                    return {"success": False, "message": f"Error leyendo logs: {str(e)}"}
+            
+            elif command == "get_activation_logs":
+                console.print("[yellow]📄 Ejecutando: Obtener Logs de Activación[/yellow]")
+                try:
+                    # Leer últimas 100 líneas del log de activación
+                    log_content = self.read_log_file(Settings.LOG_ACTIVACION, lines=100)
+                    return {"success": True, "logs": log_content, "file": Settings.LOG_ACTIVACION}
+                except Exception as e:
+                    return {"success": False, "message": f"Error leyendo logs: {str(e)}"}
+            
+            elif command == "get_agent_logs":
+                console.print("[yellow]📄 Ejecutando: Obtener Logs del Agente[/yellow]")
+                try:
+                    # Leer últimas 50 líneas del log del agente
+                    log_content = self.read_log_file("agente_stdout.log", lines=50)
+                    return {"success": True, "logs": log_content, "file": "agente_stdout.log"}
+                except Exception as e:
+                    return {"success": False, "message": f"Error leyendo logs: {str(e)}"}
+            
             else:
                 return {"success": False, "message": f"Comando desconocido: {command}"}
         
         except Exception as e:
             return {"success": False, "message": str(e)}
+    
+    def read_log_file(self, filename: str, lines: int = 100) -> str:
+        """Lee las últimas N líneas de un archivo de log"""
+        try:
+            if not os.path.exists(filename):
+                return f"[Archivo {filename} no encontrado]"
+            
+            with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
+                all_lines = f.readlines()
+                last_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                return ''.join(last_lines)
+        except Exception as e:
+            return f"[Error leyendo {filename}: {str(e)}]"
+    
+    def is_rotador_running(self) -> bool:
+        """Verifica si el RotadorSimBank está corriendo actualmente"""
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['name'] and 'python' in proc.info['name'].lower():
+                        cmdline = proc.info.get('cmdline', [])
+                        if cmdline and any('RotadorSimBank' in str(arg) for arg in cmdline):
+                            # Verificar que no sea el agente mismo
+                            if not any('--agente' in str(arg) for arg in cmdline):
+                                return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            return False
+        except:
+            return False
+    
+    def auto_restart_herosms_periodicamente(self):
+        """Reinicia Hero-SMS cada 2 horas automáticamente (solo si no está corriendo el rotador)"""
+        tiempo_transcurrido = time.time() - self.ultimo_reinicio_herosms
+        horas_transcurridas = tiempo_transcurrido / 3600
+        
+        if horas_transcurridas >= 2:
+            # Verificar si el rotador está corriendo
+            if self.is_rotador_running():
+                console.print(f"[dim]⏭️  Saltando reinicio de Hero-SMS: Rotador está en ejecución[/dim]")
+                self.ultimo_reinicio_herosms = time.time()  # Reset timer
+                return
+            
+            # Verificar si Hero-SMS está corriendo
+            herosms_status = self.check_service_status("HeroSMS-Partners.exe")
+            
+            if herosms_status["status"] == "running":
+                console.print(f"\n[cyan]⏰ Han pasado 2 horas. Reiniciando Hero-SMS automáticamente...[/cyan]")
+                try:
+                    # Cerrar Hero-SMS
+                    subprocess.run(["taskkill", "/F", "/IM", "HeroSMS-Partners.exe"], 
+                                 capture_output=True, timeout=10)
+                    time.sleep(2)
+                    
+                    # Abrir Hero-SMS
+                    user = os.environ.get("USERNAME", "")
+                    shortcut_path = f"C:\\Users\\{user}\\Desktop\\HeroSMS-Partners.lnk"
+                    if os.path.exists(shortcut_path):
+                        os.startfile(shortcut_path)
+                        console.print(f"[green]✅ Hero-SMS reiniciado automáticamente[/green]")
+                    else:
+                        console.print(f"[yellow]⚠️ No se encontró acceso directo de Hero-SMS[/yellow]")
+                except Exception as e:
+                    console.print(f"[red]❌ Error reiniciando Hero-SMS: {e}[/red]")
+            else:
+                console.print(f"[dim]💤 Hero-SMS no está corriendo, saltando reinicio automático[/dim]")
+            
+            self.ultimo_reinicio_herosms = time.time()
     
     def verificar_actualizaciones_periodicas(self):
         """Verifica actualizaciones cada 24 horas automáticamente"""
@@ -2633,11 +2768,21 @@ class AgenteControlRemoto:
     
     def send_heartbeat(self):
         """Envía el estado del sistema al dashboard"""
+        herosms_status = self.check_service_status("HeroSMS-Partners.exe")
+        rotador_running = self.is_rotador_running()
+        
         status = {
             "system": self.get_system_status(),
             "services": {
-                "herosms": {"status": self.check_service_status("HeroSMS-Partners.exe")},
-                "rotador": {"status": self.check_service_status("python.exe")}
+                "herosms": herosms_status,
+                "rotador": {
+                    "status": "running" if rotador_running else "stopped",
+                    "display": "✅ Running" if rotador_running else "❌ Stopped"
+                }
+            },
+            "timers": {
+                "next_update_check": int(24 - ((time.time() - self.ultima_verificacion_actualizacion) / 3600)),
+                "next_herosms_restart": int(2 - ((time.time() - self.ultimo_reinicio_herosms) / 3600))
             }
         }
         
@@ -2653,7 +2798,9 @@ class AgenteControlRemoto:
                 timeout=10
             )
             if response.status_code == 200:
-                console.print(f"[dim]💓 Heartbeat enviado - CPU: {status['system']['cpu_percent']}%[/dim]")
+                herosms_display = herosms_status.get("display", "❓ Unknown")
+                rotador_display = "✅ Running" if rotador_running else "❌ Stopped"
+                console.print(f"[dim]💓 Heartbeat - CPU: {status['system']['cpu_percent']}% | Hero-SMS: {herosms_display} | Rotador: {rotador_display}[/dim]")
         except Exception as e:
             console.print(f"[red]❌ Error enviando heartbeat: {e}[/red]")
     
@@ -2715,6 +2862,9 @@ class AgenteControlRemoto:
             try:
                 # Verificar actualizaciones cada 24 horas
                 self.verificar_actualizaciones_periodicas()
+                
+                # Reiniciar Hero-SMS cada 2 horas (solo si no está corriendo el rotador)
+                self.auto_restart_herosms_periodicamente()
                 
                 # Enviar estado
                 self.send_heartbeat()
