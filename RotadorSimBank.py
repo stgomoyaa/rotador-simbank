@@ -34,13 +34,20 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from rich.table import Table
 from rich.panel import Panel
 
-# Instalación automática de psycopg2 si no está disponible
+# Instalación automática de dependencias si no están disponibles
 try:
     import psycopg2
 except ImportError:
-    console.print("[yellow]📦 Instalando psycopg2-binary...[/yellow]")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "psycopg2-binary"])
     import psycopg2
+
+try:
+    import requests
+    import psutil
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests", "psutil"])
+    import requests
+    import psutil
 
 console = Console()
 
@@ -48,8 +55,13 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.6.3"  # Fixed AttributeError in cambiar_slot_pool when accessing puertos_mapeados
+    VERSION = "2.7.0"  # Integrated remote control agent with auto-install service
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
+    
+    # Agente de Control Remoto
+    AGENTE_API_URL = "https://claro-pool-dashboard.vercel.app/api/commands"
+    AGENTE_AUTH_TOKEN = "0l7TnHmWwOg3J4YBPhqZt9z1CDiMfLAk"
+    AGENTE_POLL_INTERVAL = 10  # Segundos entre consultas
     
     # Slots
     SLOT_MIN = 1
@@ -1962,6 +1974,18 @@ Ejemplos de uso:
         help="Saltar verificación de actualizaciones al inicio"
     )
     
+    parser.add_argument(
+        "--agente",
+        action="store_true",
+        help="Ejecutar en modo agente de control remoto (servicio 24/7)"
+    )
+    
+    parser.add_argument(
+        "--instalar-servicio",
+        action="store_true",
+        help="Instalar el agente como servicio de Windows"
+    )
+    
     return parser.parse_args()
 
 # ==================== SELF TEST ====================
@@ -2292,6 +2316,302 @@ def main():
     finally:
         borrar_lock()
 
+# ==================== AGENTE DE CONTROL REMOTO ====================
+class AgenteControlRemoto:
+    """Agente que escucha comandos remotos desde el dashboard de Vercel"""
+    
+    def __init__(self):
+        self.api_url = Settings.AGENTE_API_URL
+        self.auth_token = Settings.AGENTE_AUTH_TOKEN
+        self.machine_id = platform.node()
+        self.poll_interval = Settings.AGENTE_POLL_INTERVAL
+        self.rotador_script = os.path.abspath(__file__)
+        
+    def get_system_status(self):
+        """Obtiene el estado del sistema"""
+        return {
+            "cpu_percent": psutil.cpu_percent(interval=1),
+            "memory_percent": psutil.virtual_memory().percent,
+            "uptime_hours": int((time.time() - psutil.boot_time()) / 3600)
+        }
+    
+    def check_service_status(self, service_name):
+        """Verifica si un servicio está corriendo"""
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {service_name}"],
+                capture_output=True,
+                text=True
+            )
+            return "✅ Running" if service_name in result.stdout else "❌ Stopped"
+        except:
+            return "❓ Unknown"
+    
+    def execute_command(self, command):
+        """Ejecuta un comando según el tipo"""
+        try:
+            if command == "restart_pc":
+                console.print("[yellow]🔄 Ejecutando: Reiniciar PC[/yellow]")
+                subprocess.Popen(["shutdown", "/r", "/t", "10"])
+                return {"success": True, "message": "PC reiniciándose en 10s"}
+            
+            elif command == "restart_herosms":
+                console.print("[yellow]🔄 Ejecutando: Reiniciar Hero-SMS[/yellow]")
+                subprocess.run(["taskkill", "/F", "/IM", "HeroSMS-Partners.exe"], 
+                             capture_output=True, timeout=10)
+                time.sleep(2)
+                user = os.environ.get("USERNAME", "")
+                shortcut_path = f"C:\\Users\\{user}\\Desktop\\HeroSMS-Partners.lnk"
+                if os.path.exists(shortcut_path):
+                    os.startfile(shortcut_path)
+                    return {"success": True, "message": "Hero-SMS reiniciado"}
+                else:
+                    return {"success": False, "message": f"No se encontró Hero-SMS en: {shortcut_path}"}
+            
+            elif command == "restart_rotador":
+                console.print("[yellow]🔄 Ejecutando: Reiniciar Rotador[/yellow]")
+                # Detener el rotador actual
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        if proc.info['name'] and 'python' in proc.info['name'].lower():
+                            cmdline = proc.info.get('cmdline', [])
+                            if cmdline and any('RotadorSimBank' in str(arg) for arg in cmdline):
+                                proc.kill()
+                                console.print(f"[green]✅ Proceso RotadorSimBank (PID {proc.info['pid']}) detenido[/green]")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                
+                time.sleep(3)
+                
+                # Iniciar nuevo proceso
+                subprocess.Popen(
+                    [sys.executable, self.rotador_script],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if platform.system() == "Windows" else 0
+                )
+                return {"success": True, "message": "RotadorSimBank reiniciado"}
+            
+            elif command == "stop_rotador":
+                console.print("[yellow]🛑 Ejecutando: Detener Rotador[/yellow]")
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        if proc.info['name'] and 'python' in proc.info['name'].lower():
+                            cmdline = proc.info.get('cmdline', [])
+                            if cmdline and any('RotadorSimBank' in str(arg) for arg in cmdline):
+                                proc.kill()
+                                console.print(f"[green]✅ Proceso RotadorSimBank (PID {proc.info['pid']}) detenido[/green]")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                
+                # Eliminar archivo lock
+                if os.path.exists(Settings.LOCK_FILE):
+                    os.remove(Settings.LOCK_FILE)
+                
+                return {"success": True, "message": "RotadorSimBank detenido"}
+            
+            else:
+                return {"success": False, "message": f"Comando desconocido: {command}"}
+        
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+    
+    def send_heartbeat(self):
+        """Envía el estado del sistema al dashboard"""
+        status = {
+            "system": self.get_system_status(),
+            "services": {
+                "herosms": {"status": self.check_service_status("HeroSMS-Partners.exe")},
+                "rotador": {"status": self.check_service_status("python.exe")}
+            }
+        }
+        
+        try:
+            response = requests.post(
+                self.api_url,
+                json={
+                    "machine_id": self.machine_id,
+                    "action": "heartbeat",
+                    "status": status
+                },
+                headers={"Authorization": f"Bearer {self.auth_token}"},
+                timeout=10
+            )
+            if response.status_code == 200:
+                console.print(f"[dim]💓 Heartbeat enviado - CPU: {status['system']['cpu_percent']}%[/dim]")
+        except Exception as e:
+            console.print(f"[red]❌ Error enviando heartbeat: {e}[/red]")
+    
+    def poll_commands(self):
+        """Consulta si hay comandos pendientes"""
+        try:
+            response = requests.post(
+                self.api_url,
+                json={
+                    "machine_id": self.machine_id,
+                    "action": "poll"
+                },
+                headers={"Authorization": f"Bearer {self.auth_token}"},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("has_command"):
+                    command = data["command"]
+                    console.print(f"\n[bold cyan]📥 Comando recibido: {command}[/bold cyan]")
+                    
+                    # Ejecutar comando
+                    result = self.execute_command(command)
+                    console.print(f"[green]✅ Resultado: {result}[/green]")
+                    
+                    # Reportar resultado
+                    report_response = requests.post(
+                        self.api_url,
+                        json={
+                            "machine_id": self.machine_id,
+                            "action": "report",
+                            "command": command,
+                            "result": result,
+                            "timestamp": datetime.now().isoformat()
+                        },
+                        headers={"Authorization": f"Bearer {self.auth_token}"},
+                        timeout=10
+                    )
+                    
+                    if report_response.status_code == 200:
+                        console.print("[dim]📤 Resultado reportado al dashboard[/dim]\n")
+        
+        except Exception as e:
+            console.print(f"[red]❌ Error consultando comandos: {e}[/red]")
+    
+    def run(self):
+        """Bucle principal del agente"""
+        console.print("=" * 60)
+        console.print(f"[bold cyan]🤖 AGENTE DE CONTROL REMOTO - SIMBANK v{Settings.VERSION}[/bold cyan]")
+        console.print("=" * 60)
+        console.print(f"[cyan]📍 Máquina: {self.machine_id}[/cyan]")
+        console.print(f"[cyan]📡 API: {self.api_url}[/cyan]")
+        console.print(f"[cyan]⏱️  Intervalo: {self.poll_interval}s[/cyan]")
+        console.print("=" * 60)
+        console.print("\n[green]✅ Agente iniciado. Presiona Ctrl+C para detener.[/green]\n")
+        
+        while True:
+            try:
+                # Enviar estado
+                self.send_heartbeat()
+                
+                # Consultar comandos
+                self.poll_commands()
+                
+                # Esperar antes de la siguiente iteración
+                time.sleep(self.poll_interval)
+            
+            except KeyboardInterrupt:
+                console.print("\n\n[yellow]👋 Agente detenido por el usuario[/yellow]")
+                break
+            except Exception as e:
+                console.print(f"[red]❌ Error inesperado: {e}[/red]")
+                time.sleep(self.poll_interval)
+
+def instalar_servicio_windows():
+    """Instala el agente como servicio de Windows usando NSSM"""
+    console.print("\n[bold cyan]🔧 INSTALANDO AGENTE COMO SERVICIO DE WINDOWS[/bold cyan]")
+    console.print("=" * 70 + "\n")
+    
+    # Verificar permisos de administrador
+    try:
+        import ctypes
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+        if not is_admin:
+            console.print("[red]❌ Este script debe ejecutarse como Administrador[/red]")
+            console.print("[yellow]Click derecho en el .bat y selecciona 'Ejecutar como administrador'[/yellow]")
+            return False
+    except:
+        pass
+    
+    # Descargar NSSM si no existe
+    nssm_path = os.path.join(os.getcwd(), "nssm.exe")
+    if not os.path.exists(nssm_path):
+        console.print("[cyan]📥 Descargando NSSM...[/cyan]")
+        try:
+            urllib.request.urlretrieve(
+                "https://nssm.cc/release/nssm-2.24.zip",
+                "nssm.zip"
+            )
+            
+            import zipfile
+            with zipfile.ZipFile("nssm.zip", 'r') as zip_ref:
+                zip_ref.extractall(".")
+            
+            shutil.copy("nssm-2.24/win64/nssm.exe", "nssm.exe")
+            os.remove("nssm.zip")
+            shutil.rmtree("nssm-2.24")
+            
+            console.print("[green]✅ NSSM descargado[/green]")
+        except Exception as e:
+            console.print(f"[red]❌ Error descargando NSSM: {e}[/red]")
+            return False
+    
+    # Detener servicio si ya existe
+    console.print("[cyan]🛑 Deteniendo servicio existente (si existe)...[/cyan]")
+    subprocess.run([nssm_path, "stop", "AgenteRotadorSimBank"], capture_output=True)
+    subprocess.run([nssm_path, "remove", "AgenteRotadorSimBank", "confirm"], capture_output=True)
+    
+    # Instalar servicio
+    console.print("[cyan]📦 Instalando servicio...[/cyan]")
+    current_dir = os.getcwd()
+    script_path = os.path.abspath(__file__)
+    python_exe = sys.executable
+    
+    # Comando que ejecutará el servicio
+    cmd = [python_exe, script_path, "--agente"]
+    
+    result = subprocess.run(
+        [nssm_path, "install", "AgenteRotadorSimBank", python_exe, script_path, "--agente"],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        console.print(f"[red]❌ Error instalando servicio: {result.stderr}[/red]")
+        return False
+    
+    # Configurar servicio
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "AppDirectory", current_dir])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "DisplayName", "Agente Rotador SimBank"])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "Description", "Servicio de control remoto para RotadorSimBank"])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "Start", "SERVICE_AUTO_START"])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "AppStdout", os.path.join(current_dir, "agente_stdout.log")])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "AppStderr", os.path.join(current_dir, "agente_stderr.log")])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "AppRotateFiles", "1"])
+    subprocess.run([nssm_path, "set", "AgenteRotadorSimBank", "AppRotateBytes", "1048576"])
+    
+    # Iniciar servicio
+    console.print("[cyan]▶️  Iniciando servicio...[/cyan]")
+    result = subprocess.run([nssm_path, "start", "AgenteRotadorSimBank"], capture_output=True, text=True)
+    
+    if result.returncode == 0:
+        console.print("\n[bold green]✅ SERVICIO INSTALADO Y INICIADO EXITOSAMENTE[/bold green]\n")
+        console.print("[green]El agente ahora está corriendo como servicio de Windows.[/green]")
+        console.print("[green]Se iniciará automáticamente al encender el PC.[/green]\n")
+        console.print("[cyan]Comandos útiles:[/cyan]")
+        console.print(f"[dim]  - Ver estado: nssm status AgenteRotadorSimBank[/dim]")
+        console.print(f"[dim]  - Detener: nssm stop AgenteRotadorSimBank[/dim]")
+        console.print(f"[dim]  - Reiniciar: nssm restart AgenteRotadorSimBank[/dim]")
+        console.print(f"[dim]  - Desinstalar: nssm remove AgenteRotadorSimBank confirm[/dim]\n")
+        return True
+    else:
+        console.print(f"[red]❌ Error iniciando servicio: {result.stderr}[/red]")
+        return False
+
 if __name__ == "__main__":
-    main()
+    # Si se ejecuta con --agente, iniciar el agente de control remoto
+    if len(sys.argv) > 1 and sys.argv[1] == "--agente":
+        agente = AgenteControlRemoto()
+        agente.run()
+    # Si se ejecuta con --instalar-servicio, instalar como servicio de Windows
+    elif len(sys.argv) > 1 and sys.argv[1] == "--instalar-servicio":
+        instalar_servicio_windows()
+    # Si no, ejecutar el rotador normal
+    else:
+        main()
 
