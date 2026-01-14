@@ -55,7 +55,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.8.0"  # Auto-detection of SIM Banks from HeroSMS-Partners logs
+    VERSION = "2.8.1"  # Fixed SSL certificate error when downloading NSSM
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2709,10 +2709,20 @@ def instalar_servicio_windows():
     if not os.path.exists(nssm_path):
         console.print("[cyan]📥 Descargando NSSM...[/cyan]")
         try:
-            urllib.request.urlretrieve(
+            # Intentar descarga con certificados deshabilitados (fix para Python 3.11+)
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            req = urllib.request.Request(
                 "https://nssm.cc/release/nssm-2.24.zip",
-                "nssm.zip"
+                headers={'User-Agent': 'Mozilla/5.0'}
             )
+            
+            with urllib.request.urlopen(req, context=ssl_context, timeout=30) as response:
+                with open("nssm.zip", 'wb') as out_file:
+                    out_file.write(response.read())
             
             import zipfile
             with zipfile.ZipFile("nssm.zip", 'r') as zip_ref:
@@ -2725,6 +2735,12 @@ def instalar_servicio_windows():
             console.print("[green]✅ NSSM descargado[/green]")
         except Exception as e:
             console.print(f"[red]❌ Error descargando NSSM: {e}[/red]")
+            console.print("\n[yellow]📥 Descarga manual de NSSM:[/yellow]")
+            console.print("[yellow]1. Ve a: https://nssm.cc/release/nssm-2.24.zip[/yellow]")
+            console.print("[yellow]2. Descarga el archivo[/yellow]")
+            console.print("[yellow]3. Extrae 'nssm-2.24\\win64\\nssm.exe'[/yellow]")
+            console.print(f"[yellow]4. Copia nssm.exe a: {os.getcwd()}[/yellow]")
+            console.print("[yellow]5. Ejecuta este comando de nuevo[/yellow]\n")
             return False
     
     # Detener servicio si ya existe
