@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.10.3"  # Fixed screenshot capture for Windows services (Session 0)
+    VERSION = "2.10.4"  # Fixed simbanks detection: read recent logs, validate COM ports, handle duplicates
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -169,8 +169,12 @@ def detectar_simbanks_desde_log() -> dict:
     """
     Detecta automáticamente la configuración de SIM Banks desde el log de HeroSMS-Partners.
     
-    Busca el archivo simBanks.txt y parsea las líneas de configuración.
-    Soporta diferentes formatos: 'Pool #1', 'Pool 1', 'Pool1', '1', etc.
+    MEJORAS v2.10.4:
+    - Lee solo las últimas 300 líneas (configuración más reciente)
+    - Sobrescribe duplicados (usa la última aparición)
+    - Parsea timestamps para filtrar por fecha
+    - Valida que los COM detectados existan
+    - Mejor manejo de formatos: 'Pool #1', 'Pool 1', 'Pool1', '1', etc.
     
     Returns:
         dict: Diccionario con la configuración de SIM Banks detectada
@@ -188,61 +192,104 @@ def detectar_simbanks_desde_log() -> dict:
         
         escribir_log(f"📂 Detectando SIM Banks desde: {log_path}")
         
-        # Leer archivo y buscar líneas de configuración
-        pools_detectados = {}
-        
+        # Leer las últimas 300 líneas del archivo (configuración más reciente)
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for linea in f:
-                # Buscar líneas que contengan "Успешно добавлен" (Successfully added)
-                if "Успешно добавлен" in linea or "Успешно" in linea:
-                    # Formato: "COM62 'Pool #1' : Успешно добавлен"
-                    # O: "COM37 '1' : Успешно добавлен"
-                    
-                    # Extraer COM port
-                    match_com = re.search(r'COM(\d+)', linea)
-                    if not match_com:
-                        continue
-                    
-                    com_port = f"COM{match_com.group(1)}"
-                    
-                    # Extraer nombre del pool (entre comillas)
-                    match_pool = re.search(r"'([^']+)'", linea)
-                    if not match_pool:
-                        continue
-                    
-                    pool_name_raw = match_pool.group(1)
-                    
-                    # Normalizar nombre del pool
-                    # Soportar: "Pool #1", "Pool 1", "Pool1", "1", etc.
-                    match_number = re.search(r'(\d+)', pool_name_raw)
-                    if not match_number:
-                        continue
-                    
-                    pool_number = int(match_number.group(1))
-                    pool_name = f"Pool{pool_number}"
-                    
-                    # Agregar al diccionario
-                    if pool_name not in pools_detectados:
-                        pools_detectados[pool_name] = {
-                            "com": com_port,
-                            "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"],
-                            "offset_slot": (pool_number - 1) * 8,  # Offset automático: 0, 8, 16, 24
-                            "numero": pool_number
-                        }
+            todas_las_lineas = f.readlines()
         
-        if not pools_detectados:
-            escribir_log("⚠️ No se detectaron SIM Banks en el log")
+        # Tomar solo las últimas 300 líneas
+        ultimas_lineas = todas_las_lineas[-300:] if len(todas_las_lineas) > 300 else todas_las_lineas
+        
+        escribir_log(f"📊 Analizando últimas {len(ultimas_lineas)} líneas del log...")
+        
+        # Diccionario temporal para almacenar pools con timestamp
+        pools_con_timestamp = {}
+        
+        # Parsear líneas
+        for linea in ultimas_lineas:
+            # Buscar líneas que contengan "Успешно добавлен" (Successfully added)
+            if "Успешно добавлен" in linea:
+                # Formato: "DD.MM.YY HH:MM:SS.mmm|COMXX 'Pool #1' : Успешно добавлен"
+                
+                # Extraer timestamp (si existe)
+                timestamp_str = None
+                match_timestamp = re.match(r'^(\d{2}\.\d{2}\.\d{2}\s+\d{2}:\d{2}:\d{2})\.\d+\|', linea)
+                if match_timestamp:
+                    timestamp_str = match_timestamp.group(1)
+                
+                # Extraer COM port
+                match_com = re.search(r'COM(\d+)', linea)
+                if not match_com:
+                    continue
+                
+                com_port = f"COM{match_com.group(1)}"
+                
+                # Extraer nombre del pool (entre comillas)
+                match_pool = re.search(r"'([^']+)'", linea)
+                if not match_pool:
+                    continue
+                
+                pool_name_raw = match_pool.group(1)
+                
+                # Normalizar nombre del pool
+                # Soportar: "Pool #1", "Pool 1", "Pool1", "1", etc.
+                match_number = re.search(r'(\d+)', pool_name_raw)
+                if not match_number:
+                    continue
+                
+                pool_number = int(match_number.group(1))
+                pool_name = f"Pool{pool_number}"
+                
+                # Guardar/actualizar pool (sobrescribe si ya existe = usa la última aparición)
+                pools_con_timestamp[pool_name] = {
+                    "com": com_port,
+                    "puertos": ["01", "02", "03", "04", "05", "06", "07", "08"],
+                    "offset_slot": (pool_number - 1) * 8,  # Offset automático: 0, 8, 16, 24
+                    "numero": pool_number,
+                    "timestamp": timestamp_str,
+                    "pool_name_original": pool_name_raw
+                }
+                
+                escribir_log(f"   🔍 Detectado: {pool_name} ({pool_name_raw}) -> {com_port} @ {timestamp_str or 'sin timestamp'}")
+        
+        if not pools_con_timestamp:
+            escribir_log("⚠️ No se detectaron SIM Banks en las últimas líneas del log")
+            escribir_log("   💡 Asegúrate de que HeroSMS-Partners tenga simbanks agregados recientemente")
+            return {}
+        
+        # Validar que los COM ports existan en el sistema
+        puertos_disponibles = listar_puertos_disponibles()
+        escribir_log(f"🔌 Puertos COM disponibles en el sistema: {', '.join(puertos_disponibles)}")
+        
+        pools_validados = {}
+        for pool_name, pool_data in pools_con_timestamp.items():
+            com_port = pool_data["com"]
+            
+            if com_port in puertos_disponibles:
+                # Remover campos temporales antes de guardar
+                pools_validados[pool_name] = {
+                    "com": pool_data["com"],
+                    "puertos": pool_data["puertos"],
+                    "offset_slot": pool_data["offset_slot"],
+                    "numero": pool_data["numero"]
+                }
+                escribir_log(f"   ✅ {pool_name}: {com_port} validado (existe en sistema)")
+            else:
+                escribir_log(f"   ⚠️ {pool_name}: {com_port} NO encontrado en sistema (será ignorado)")
+        
+        if not pools_validados:
+            escribir_log("❌ Ninguno de los COM detectados existe en el sistema")
+            escribir_log("   💡 Verifica las conexiones USB de los simbanks")
             return {}
         
         # Ordenar por número de pool
-        pools_ordenados = dict(sorted(pools_detectados.items(), key=lambda x: x[1]['numero']))
+        pools_ordenados = dict(sorted(pools_validados.items(), key=lambda x: x[1]['numero']))
         
         # Remover campo 'numero' que solo usamos para ordenar
         for pool_config in pools_ordenados.values():
             del pool_config['numero']
         
-        # Mostrar configuración detectada
-        escribir_log("✅ SIM Banks detectados automáticamente:")
+        # Mostrar configuración final detectada
+        escribir_log(f"✅ SIM Banks detectados y validados: {len(pools_ordenados)}")
         for pool_name, config in pools_ordenados.items():
             escribir_log(f"   {pool_name}: {config['com']} (offset={config['offset_slot']})")
         
@@ -250,6 +297,8 @@ def detectar_simbanks_desde_log() -> dict:
         
     except Exception as e:
         escribir_log(f"❌ Error al detectar SIM Banks: {e}")
+        import traceback
+        escribir_log(f"   Detalles: {traceback.format_exc()}")
         return {}
 
 def guardar_simbanks_config(config: dict):
