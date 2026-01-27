@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.10.4"  # Fixed simbanks detection: read recent logs, validate COM ports, handle duplicates
+    VERSION = "2.10.5"  # Mejoras: detección SIM Banks + taskkill robusto (previene abrir HeroSMS dos veces)
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -1571,28 +1571,66 @@ def verificar_intensidad_senal(puerto: str) -> int:
 
 # ==================== FUNCIONES DE SIMCLIENT ====================
 def cerrar_simclient():
-    """Cierra HeroSMS-Partners usando taskkill"""
+    """Cierra HeroSMS-Partners usando taskkill y verifica que se haya cerrado completamente"""
     try:
         console.print("[yellow]🛑 Cerrando HeroSMS-Partners...[/yellow]")
+        
+        # Primer intento: taskkill normal
         result = subprocess.run(
             ["taskkill", "/f", "/im", "HeroSMS-Partners.exe"],
             capture_output=True,
             text=True
         )
+        
         if result.returncode == 0:
-            escribir_log("✅ HeroSMS-Partners cerrado correctamente")
+            escribir_log("✅ HeroSMS-Partners: Comando taskkill enviado")
+            
+            # Verificar que realmente se cerró (esperar hasta 5 segundos)
+            for intento in range(5):
+                time.sleep(1)
+                check = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq HeroSMS-Partners.exe"],
+                    capture_output=True,
+                    text=True
+                )
+                if "HeroSMS-Partners.exe" not in check.stdout:
+                    escribir_log("✅ HeroSMS-Partners cerrado completamente")
+                    time.sleep(1)  # Espera adicional para liberar puertos
+                    return True
+            
+            # Si después de 5 segundos sigue abierto, forzar cierre adicional
+            escribir_log("⚠️ HeroSMS-Partners no se cerró completamente, forzando cierre...")
+            subprocess.run(
+                ["taskkill", "/f", "/t", "/im", "HeroSMS-Partners.exe"],
+                capture_output=True,
+                text=True
+            )
             time.sleep(2)
             return True
         else:
             escribir_log("⚠️ HeroSMS-Partners no estaba ejecutándose")
             return True
+            
     except Exception as e:
         escribir_log(f"❌ Error al cerrar HeroSMS-Partners: {e}")
         return False
 
 def abrir_simclient():
-    """Abre HeroSMS-Partners desde el acceso directo en el escritorio"""
+    """Abre HeroSMS-Partners desde el acceso directo en el escritorio (verifica que no esté ya abierto)"""
     try:
+        # Verificar si HeroSMS-Partners ya está ejecutándose
+        check = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq HeroSMS-Partners.exe"],
+            capture_output=True,
+            text=True
+        )
+        
+        if "HeroSMS-Partners.exe" in check.stdout:
+            escribir_log("⚠️ HeroSMS-Partners ya está en ejecución (no se abrirá de nuevo)")
+            console.print("[yellow]⚠️ HeroSMS-Partners ya está abierto[/yellow]")
+            return True
+        
+        # Si no está abierto, proceder a abrirlo
         user = os.environ["USERNAME"]
         simclient_path = f"C:\\Users\\{user}\\Desktop\\HeroSMS-Partners.lnk"
         
@@ -1600,11 +1638,26 @@ def abrir_simclient():
             console.print("[green]🟢 Abriendo HeroSMS-Partners...[/green]")
             os.startfile(simclient_path)
             escribir_log("✅ HeroSMS-Partners iniciado")
-            time.sleep(5)
-            return True
+            
+            # Verificar que se haya abierto correctamente (esperar hasta 10 segundos)
+            for intento in range(10):
+                time.sleep(1)
+                check_abierto = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq HeroSMS-Partners.exe"],
+                    capture_output=True,
+                    text=True
+                )
+                if "HeroSMS-Partners.exe" in check_abierto.stdout:
+                    escribir_log(f"✅ HeroSMS-Partners confirmado en ejecución (tras {intento + 1}s)")
+                    time.sleep(4)  # Espera adicional para que cargue completamente
+                    return True
+            
+            escribir_log("⚠️ No se pudo confirmar que HeroSMS-Partners se haya abierto")
+            return True  # Retornar True igual para no bloquear el flujo
         else:
             escribir_log(f"❌ No se encontró HeroSMS-Partners en: {simclient_path}")
             return False
+            
     except Exception as e:
         escribir_log(f"❌ Error al abrir HeroSMS-Partners: {e}")
         return False
