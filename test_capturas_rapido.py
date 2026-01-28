@@ -90,6 +90,7 @@ def cambiar_slot_pool_rapido(pool_name: str, pool_config: dict, slot_base: int) 
     
     # Calcular slot real con offset
     slot_real = ((slot_base - 1 + offset_slot) % TOTAL_SLOTS) + 1
+    slot_formateado = f"{slot_real:04d}"
     
     print(f"  📡 {pool_name}: Cambiando a slot {slot_real:02d} (COM: {sim_bank_com})")
     
@@ -112,7 +113,7 @@ def cambiar_slot_pool_rapido(pool_name: str, pool_config: dict, slot_base: int) 
         
         # Cambiar cada puerto lógico
         for puerto_logico in puertos_logicos:
-            comando = f"AT+SWIT={puerto_logico},{slot_real}\r\n"
+            comando = f"AT+SWIT{puerto_logico}-{slot_formateado}\r\n"
             ser.write(comando.encode())
             time.sleep(0.2)  # Reducido de 0.3 a 0.2
         
