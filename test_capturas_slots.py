@@ -20,8 +20,8 @@ from pathlib import Path
 
 # Importar funciones del script principal
 try:
+    import RotadorSimBank
     from RotadorSimBank import (
-        SIM_BANKS,
         inicializar_simbanks,
         cerrar_simclient,
         abrir_simclient,
@@ -120,7 +120,7 @@ def capturar_pantalla(carpeta: str, slot: int):
         print(f"  ⚠️ Error al capturar pantalla: {e}")
         return False
 
-def procesar_slot(slot: int, carpeta_capturas: str):
+def procesar_slot(slot: int, carpeta_capturas: str, sim_banks: dict):
     """Procesa un slot completo: cerrar, rotar, abrir, esperar, capturar, cerrar"""
     print(f"\n{'='*80}")
     print(f"🔄 PROCESANDO SLOT {slot:02d}/{TOTAL_SLOTS} ({(slot/TOTAL_SLOTS)*100:.1f}%)")
@@ -134,7 +134,7 @@ def procesar_slot(slot: int, carpeta_capturas: str):
     
     # 2. Rotar todos los pools al slot
     print(f"2️⃣ Rotando todos los pools al slot {slot:02d}...")
-    for pool_name, pool_config in SIM_BANKS.items():
+    for pool_name, pool_config in sim_banks.items():
         cambiar_slot_pool_test(pool_name, pool_config, slot)
     
     # Esperar a que se apliquen los cambios
@@ -185,6 +185,9 @@ def main():
     print("\n🔍 Inicializando configuración de SIM Banks...")
     inicializar_simbanks()
     
+    # Obtener SIM_BANKS del módulo (no de la importación)
+    SIM_BANKS = RotadorSimBank.SIM_BANKS
+    
     if not SIM_BANKS:
         print("❌ No se detectaron SIM Banks. Verifica la configuración.")
         return
@@ -205,7 +208,7 @@ def main():
     
     for slot in range(1, TOTAL_SLOTS + 1):
         try:
-            procesar_slot(slot, carpeta)
+            procesar_slot(slot, carpeta, SIM_BANKS)
         except KeyboardInterrupt:
             print("\n\n⚠️  Test interrumpido por usuario (Ctrl+C)")
             print("🛑 Cerrando HeroSMS y limpiando...")
