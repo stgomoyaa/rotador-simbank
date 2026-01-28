@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.10.5"  # Mejoras: detección SIM Banks + taskkill robusto (previene abrir HeroSMS dos veces)
+    VERSION = "2.11.0"  # NUEVO: Modo mantenimiento continuo (loop infinito + activación 24h + reinicio HeroSMS 1h)
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2236,6 +2236,12 @@ Ejemplos de uso:
     )
     
     parser.add_argument(
+        "--modo-mantenimiento",
+        action="store_true",
+        help="Modo mantenimiento continuo: Activa todas las SIMs cada 24h + reinicia HeroSMS cada 1h (loop infinito)"
+    )
+    
+    parser.add_argument(
         "--export-db",
         action="store_true",
         help="Exportar base de datos PostgreSQL a archivo local y salir"
@@ -2408,6 +2414,153 @@ def activacion_masiva_todas_las_sims():
     escribir_log(f"   Slots procesados: 32/32")
     escribir_log("="*80)
 
+# ==================== MODO CONTINUO (LOOP INFINITO) ====================
+def modo_continuo_con_mantenimiento():
+    """
+    Modo de ejecución continua con mantenimiento automático:
+    - Ejecuta activación masiva (32 slots) cada 24 horas
+    - Reinicia HeroSMS-Partners cada 1 hora
+    - Loop infinito (nunca se detiene)
+    
+    v2.10.6: Nueva funcionalidad para mantener el sistema siempre activo
+    """
+    console.print("\n[bold cyan]{'='*80}[/bold cyan]")
+    console.print("[bold cyan]🔄 MODO CONTINUO CON MANTENIMIENTO AUTOMÁTICO[/bold cyan]")
+    console.print("[bold cyan]{'='*80}[/bold cyan]")
+    console.print("[cyan]   • Activación masiva: cada 24 horas[/cyan]")
+    console.print("[cyan]   • Reinicio HeroSMS: cada 1 hora[/cyan]")
+    console.print("[cyan]   • Ejecución: INFINITA (hasta detención manual)[/cyan]")
+    console.print("[bold cyan]{'='*80}[/bold cyan]\n")
+    
+    escribir_log("="*80)
+    escribir_log("🔄 MODO CONTINUO INICIADO")
+    escribir_log("   Activación masiva: cada 24 horas")
+    escribir_log("   Reinicio HeroSMS: cada 1 hora")
+    escribir_log("="*80)
+    
+    # Inicializar configuración de SIM Banks
+    inicializar_simbanks()
+    mostrar_configuracion()
+    validar_simbanks()
+    
+    # Contadores de tiempo
+    ultima_activacion_masiva = 0  # Timestamp de última activación masiva
+    ultimo_reinicio_herosms = time.time()  # Timestamp de último reinicio de HeroSMS
+    
+    # Intervalos (en segundos)
+    INTERVALO_ACTIVACION_MASIVA = 24 * 60 * 60  # 24 horas
+    INTERVALO_REINICIO_HEROSMS = 1 * 60 * 60    # 1 hora
+    
+    # Ejecutar primera activación masiva al inicio
+    console.print("[bold green]🚀 Ejecutando primera activación masiva...[/bold green]\n")
+    try:
+        activacion_masiva_todas_las_sims()
+        ultima_activacion_masiva = time.time()
+        console.print("\n[bold green]✅ Primera activación masiva completada[/bold green]\n")
+    except Exception as e:
+        escribir_log(f"❌ Error en primera activación masiva: {e}")
+        console.print(f"[red]❌ Error en activación masiva: {e}[/red]")
+    
+    # Loop infinito
+    iteracion = 1
+    while True:
+        try:
+            tiempo_actual = time.time()
+            
+            # Calcular tiempo transcurrido
+            tiempo_desde_ultima_activacion = tiempo_actual - ultima_activacion_masiva
+            tiempo_hasta_proxima_activacion = INTERVALO_ACTIVACION_MASIVA - tiempo_desde_ultima_activacion
+            
+            tiempo_desde_ultimo_reinicio = tiempo_actual - ultimo_reinicio_herosms
+            tiempo_hasta_proximo_reinicio = INTERVALO_REINICIO_HEROSMS - tiempo_desde_ultimo_reinicio
+            
+            # Mostrar estado
+            console.print(f"\n[bold cyan]{'─'*80}[/bold cyan]")
+            console.print(f"[bold cyan]📊 ESTADO DEL SISTEMA - Iteración #{iteracion}[/bold cyan]")
+            console.print(f"[bold cyan]{'─'*80}[/bold cyan]")
+            console.print(f"[cyan]⏱️  Tiempo desde última activación masiva: {tiempo_desde_ultima_activacion/3600:.1f}h[/cyan]")
+            console.print(f"[cyan]⏱️  Próxima activación masiva en: {max(0, tiempo_hasta_proxima_activacion)/3600:.1f}h[/cyan]")
+            console.print(f"[yellow]⏱️  Tiempo desde último reinicio HeroSMS: {tiempo_desde_ultimo_reinicio/60:.1f}min[/cyan]")
+            console.print(f"[yellow]⏱️  Próximo reinicio HeroSMS en: {max(0, tiempo_hasta_proximo_reinicio)/60:.1f}min[/cyan]")
+            console.print(f"[bold cyan]{'─'*80}[/bold cyan]\n")
+            
+            escribir_log(f"📊 Estado: Próxima activación en {max(0, tiempo_hasta_proxima_activacion)/3600:.1f}h | Próximo reinicio HeroSMS en {max(0, tiempo_hasta_proximo_reinicio)/60:.1f}min")
+            
+            # 1. Verificar si es hora de ejecutar activación masiva (cada 24 horas)
+            if tiempo_desde_ultima_activacion >= INTERVALO_ACTIVACION_MASIVA:
+                console.print("\n[bold magenta]{'='*80}[/bold magenta]")
+                console.print("[bold magenta]🚀 HORA DE EJECUTAR ACTIVACIÓN MASIVA (24h cumplidas)[/bold magenta]")
+                console.print("[bold magenta]{'='*80}[/bold magenta]\n")
+                
+                escribir_log("="*80)
+                escribir_log("🚀 EJECUTANDO ACTIVACIÓN MASIVA (ciclo de 24h)")
+                escribir_log("="*80)
+                
+                try:
+                    activacion_masiva_todas_las_sims()
+                    ultima_activacion_masiva = time.time()
+                    ultimo_reinicio_herosms = time.time()  # Reset reinicio HeroSMS (ya se reinició en activación)
+                    
+                    console.print("\n[bold green]✅ Activación masiva completada exitosamente[/bold green]\n")
+                    escribir_log("✅ Activación masiva completada exitosamente")
+                    
+                except Exception as e:
+                    escribir_log(f"❌ Error en activación masiva: {e}")
+                    console.print(f"[red]❌ Error en activación masiva: {e}[/red]")
+                    console.print("[yellow]⏭️  Continuando con el ciclo...[/yellow]\n")
+                    ultima_activacion_masiva = time.time()  # Marcar como completado para evitar re-intentos inmediatos
+            
+            # 2. Verificar si es hora de reiniciar HeroSMS (cada 1 hora)
+            elif tiempo_desde_ultimo_reinicio >= INTERVALO_REINICIO_HEROSMS:
+                console.print("\n[bold yellow]{'='*80}[/bold yellow]")
+                console.print("[bold yellow]🔄 REINICIANDO HeroSMS-Partners (mantenimiento horario)[/bold yellow]")
+                console.print("[bold yellow]{'='*80}[/bold yellow]\n")
+                
+                escribir_log("🔄 Reiniciando HeroSMS-Partners (mantenimiento horario)")
+                
+                try:
+                    # Cerrar HeroSMS
+                    cerrar_simclient()
+                    cerrar_puertos_serial()
+                    
+                    # Esperar un momento
+                    console.print("[yellow]⏳ Esperando 5 segundos...[/yellow]")
+                    time.sleep(5)
+                    
+                    # Abrir HeroSMS
+                    abrir_simclient()
+                    
+                    ultimo_reinicio_herosms = time.time()
+                    
+                    console.print("[green]✅ HeroSMS-Partners reiniciado exitosamente[/green]\n")
+                    escribir_log("✅ HeroSMS-Partners reiniciado exitosamente")
+                    
+                except Exception as e:
+                    escribir_log(f"⚠️ Error al reiniciar HeroSMS: {e}")
+                    console.print(f"[yellow]⚠️ Error al reiniciar HeroSMS: {e}[/yellow]")
+                    console.print("[yellow]⏭️  Continuando con el ciclo...[/yellow]\n")
+                    ultimo_reinicio_herosms = time.time()  # Marcar como completado
+            
+            # 3. Esperar antes de la próxima verificación (chequear cada 5 minutos)
+            tiempo_espera = 5 * 60  # 5 minutos
+            console.print(f"[dim]💤 Esperando 5 minutos para próxima verificación...[/dim]")
+            console.print(f"[dim]   (Presiona Ctrl+C para detener)[/dim]\n")
+            time.sleep(tiempo_espera)
+            
+            iteracion += 1
+            
+        except KeyboardInterrupt:
+            console.print("\n\n[yellow]⚠️  Interrupción detectada (Ctrl+C)[/yellow]")
+            console.print("[yellow]🛑 Deteniendo modo continuo...[/yellow]\n")
+            escribir_log("⚠️ Modo continuo detenido por usuario (Ctrl+C)")
+            break
+            
+        except Exception as e:
+            escribir_log(f"❌ Error en loop principal: {e}")
+            console.print(f"[red]❌ Error en loop: {e}[/red]")
+            console.print("[yellow]⏭️  Continuando después de 1 minuto...[/yellow]\n")
+            time.sleep(60)  # Esperar 1 minuto antes de reintentar
+
 # ==================== BUCLE PRINCIPAL ====================
 def mostrar_configuracion():
     """Muestra la configuración inicial en una tabla"""
@@ -2474,18 +2627,24 @@ def main():
         actualizar_script()
         return
     
-    # Si se especifica modo continuo, desactivar activación masiva
-    if args.modo_continuo:
-        Settings.MODO_ACTIVACION_MASIVA = False
-        console.print(f"[yellow]🔄 Modo ROTACIÓN CONTINUA activado[/yellow]")
-    else:
-        # Modo masivo por defecto, activar auto-update para no pedir confirmación
-        Settings.AUTO_UPDATE = True
-        console.print(f"[yellow]🚀 Modo ACTIVACIÓN MASIVA activado (por defecto)[/yellow]")
-    
     # Verificar actualizaciones al inicio (si no se desactiva)
     if not args.no_update_check and Settings.CHECK_UPDATES:
         verificar_y_actualizar()
+    
+    # Determinar modo de operación
+    if args.modo_mantenimiento:
+        # NUEVO: Modo mantenimiento continuo (loop infinito con activación cada 24h y reinicio HeroSMS cada 1h)
+        console.print(f"[bold cyan]🔄 Modo MANTENIMIENTO CONTINUO activado[/bold cyan]")
+        modo_continuo_con_mantenimiento()
+        return
+    elif args.modo_continuo:
+        # Modo rotación continua cada 30 minutos
+        Settings.MODO_ACTIVACION_MASIVA = False
+        console.print(f"[yellow]🔄 Modo ROTACIÓN CONTINUA activado[/yellow]")
+    else:
+        # Modo masivo por defecto (ejecuta una vez y termina)
+        Settings.AUTO_UPDATE = True
+        console.print(f"[yellow]🚀 Modo ACTIVACIÓN MASIVA activado (por defecto)[/yellow]")
     
     # Crear tabla de base de datos si no existe
     if Settings.DB_ENABLED:
