@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.11.0"  # NUEVO: Modo mantenimiento continuo (loop infinito + activación 24h + reinicio HeroSMS 1h)
+    VERSION = "2.11.1"  # FIX: Eliminada re-verificación innecesaria de CREG (ahorrando 4 minutos por slot)
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2217,35 +2217,15 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
     # 8.5 NUEVO: Verificar registro en red (compatible con HeroSMS Java dv.java)
     console.print("[bold blue]🔍 Paso 2.5/3: Verificando registro en red...[/bold blue]")
     registrados, sin_registrar = verificar_registro_modems_global(modems_activos)
-    console.print(f"[cyan]📊 {registrados} registrados | {sin_registrar} sin registrar[/cyan]")
-    escribir_log(f"📊 Registro inicial: {registrados}/{len(modems_activos)} registrados")
     
-    # Esperar hasta que al menos 70% estén registrados (tolerancia para ubicación con señal débil)
-    intentos_registro = 0
-    max_intentos_registro = 4
-    umbral_objetivo = 0.70  # 70% es aceptable para UC20 en señal débil
+    porcentaje_actual = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
+    console.print(f"[cyan]📊 {registrados} registrados | {sin_registrar} sin registrar ({porcentaje_actual:.0f}%)[/cyan]")
+    escribir_log(f"📊 Registro en red: {registrados}/{len(modems_activos)} registrados ({porcentaje_actual:.0f}%)")
     
-    while registrados < len(modems_activos) * umbral_objetivo and intentos_registro < max_intentos_registro:
-        intentos_registro += 1
-        tiempo_espera = 60
-        
-        porcentaje_actual = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
-        escribir_log(f"⚠️  Solo {registrados}/{len(modems_activos)} registrados ({porcentaje_actual:.0f}%). Esperando {tiempo_espera}s más... (intento {intentos_registro}/{max_intentos_registro})")
-        console.print(f"[yellow]  ⏳ Esperando {tiempo_espera}s adicionales para más registros (intento {intentos_registro}/{max_intentos_registro})...[/yellow]")
-        time.sleep(tiempo_espera)
-        
-        registrados, sin_registrar = verificar_registro_modems_global(modems_activos)
-        porcentaje_actual = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
-        console.print(f"[cyan]  📊 Ahora: {registrados} registrados | {sin_registrar} sin registrar ({porcentaje_actual:.0f}%)[/cyan]")
-    
-    porcentaje_final = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
-    if registrados >= len(modems_activos) * umbral_objetivo:
-        escribir_log(f"✅ Objetivo alcanzado: {registrados}/{len(modems_activos)} módems registrados ({porcentaje_final:.0f}%)")
-        console.print(f"[green]✅ Registro en red: {registrados}/{len(modems_activos)} ({porcentaje_final:.0f}%)[/green]")
-    else:
-        escribir_log(f"⚠️  Solo {registrados}/{len(modems_activos)} módems registrados ({porcentaje_final:.0f}%) después de {intentos_registro * 60}s")
-        console.print(f"[yellow]⚠️  Registro limitado: {registrados}/{len(modems_activos)} ({porcentaje_final:.0f}%)[/yellow]")
-        console.print(f"[yellow]   Posible problema de señal/antenas (ver diagnóstico)[/yellow]")
+    # Mostrar advertencia si el porcentaje es bajo, pero CONTINUAR (no esperar)
+    if porcentaje_actual < 70:
+        console.print(f"[yellow]⚠️  Registro limitado ({porcentaje_actual:.0f}%), pero continuando con activación[/yellow]")
+        escribir_log(f"⚠️  Registro limitado ({porcentaje_actual:.0f}%), continuando de todas formas")
     
     # 9. ACTIVACIÓN DE SIMS CLARO (si está habilitada)
     if Settings.ACTIVAR_SIMS_CLARO and iccids_verificados:
