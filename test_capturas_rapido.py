@@ -15,6 +15,7 @@ import serial
 from datetime import datetime
 from pathlib import Path
 import threading
+import json
 
 # Importar funciones del script principal
 try:
@@ -35,53 +36,172 @@ TOTAL_SLOTS = 32
 TIEMPO_ESPERA_MINUTOS = 4  # Balance entre velocidad y efectividad
 TIEMPO_REINICIO_MODEMS = 30  # Tiempo para reinicio de módems después de AT+CFUN=1,1
 CARPETA_CAPTURAS = "capturas_test_rapido"
+ARCHIVO_LOG_DETALLADO = None  # Se inicializa en crear_carpeta_capturas()
+
+def log_detallado(mensaje: str):
+    """Escribe en el log detallado y en consola"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    linea_log = f"[{timestamp}] {mensaje}"
+    print(f"  📝 {mensaje}")
+    
+    if ARCHIVO_LOG_DETALLADO:
+        try:
+            with open(ARCHIVO_LOG_DETALLADO, 'a', encoding='utf-8') as f:
+                f.write(linea_log + '\n')
+        except:
+            pass
 
 def crear_carpeta_capturas():
     """Crea la carpeta para guardar capturas si no existe"""
+    global ARCHIVO_LOG_DETALLADO
+    
     fecha = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     carpeta = f"{CARPETA_CAPTURAS}_{fecha}"
     
     if not os.path.exists(carpeta):
         os.makedirs(carpeta)
     
+    ARCHIVO_LOG_DETALLADO = os.path.join(carpeta, "test_detallado.log")
+    
     print(f"📁 Carpeta de capturas: {carpeta}")
+    print(f"📋 Log detallado: {ARCHIVO_LOG_DETALLADO}")
+    
+    # Inicializar archivo de log
+    with open(ARCHIVO_LOG_DETALLADO, 'w', encoding='utf-8') as f:
+        f.write(f"{'='*80}\n")
+        f.write(f"TEST RÁPIDO DE CAPTURAS - LOG DETALLADO\n")
+        f.write(f"Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*80}\n\n")
+    
     return carpeta
 
-def obtener_iccid_puerto(com_port: str) -> str:
-    """Obtiene el ICCID de un puerto COM"""
+def enviar_comando_at(com_port: str, comando: str, timeout: float = 2.0) -> str:
+    """Envía un comando AT y retorna la respuesta completa"""
     try:
         ser = serial.Serial(
             port=com_port,
             baudrate=115200,
-            timeout=2
+            timeout=timeout
         )
         
         # Limpiar buffer
         ser.reset_input_buffer()
         ser.reset_output_buffer()
         
-        # Enviar comando AT+CCID
-        ser.write(b"AT+CCID\r\n")
-        time.sleep(0.5)
+        # Enviar comando
+        ser.write(f"{comando}\r\n".encode())
+        time.sleep(0.3)
         
         # Leer respuesta
-        respuesta = ser.read(200).decode('utf-8', errors='ignore')
+        respuesta = ser.read(500).decode('utf-8', errors='ignore')
         ser.close()
         
-        # Parsear ICCID (buscar +CCID: seguido del número)
-        if "+CCID:" in respuesta or "CCID:" in respuesta:
-            lineas = respuesta.split('\n')
-            for linea in lineas:
-                if "CCID:" in linea:
-                    iccid = linea.split("CCID:")[-1].strip().replace("OK", "").strip()
-                    # Validar que sea un ICCID (solo números, 19-20 dígitos)
-                    if iccid.isdigit() and 15 <= len(iccid) <= 22:
-                        return iccid
-        
-        return ""
+        return respuesta.strip()
         
     except Exception as e:
-        return ""
+        return f"ERROR: {str(e)}"
+
+def obtener_iccid_puerto(com_port: str) -> dict:
+    """Obtiene el ICCID de un puerto COM con detalles"""
+    resultado = {
+        "puerto": com_port,
+        "iccid": "",
+        "respuesta_at": "",
+        "error": None
+    }
+    
+    try:
+        # Intentar con AT+QCCID (Quectel)
+        respuesta = enviar_comando_at(com_port, "AT+QCCID", timeout=2.0)
+        resultado["respuesta_at"] = respuesta
+        
+        # Parsear ICCID
+        if "+QCCID:" in respuesta or "QCCID:" in respuesta:
+            lineas = respuesta.split('\n')
+            for linea in lineas:
+                if "QCCID:" in linea:
+                    iccid = linea.split("QCCID:")[-1].strip().replace("OK", "").strip()
+                    # Limpiar caracteres no numéricos al final
+                    iccid_limpio = ""
+                    for char in iccid:
+                        if char.isdigit() or char in ['F', 'f']:
+                            iccid_limpio += char
+                        else:
+                            break
+                    
+                    if len(iccid_limpio) >= 15:
+                        resultado["iccid"] = iccid_limpio
+                        return resultado
+        
+        # Si no funciona, intentar AT+CCID
+        if not resultado["iccid"]:
+            respuesta = enviar_comando_at(com_port, "AT+CCID", timeout=2.0)
+            resultado["respuesta_at"] = respuesta
+            
+            if "+CCID:" in respuesta or "CCID:" in respuesta:
+                lineas = respuesta.split('\n')
+                for linea in lineas:
+                    if "CCID:" in linea:
+                        iccid = linea.split("CCID:")[-1].strip().replace("OK", "").strip()
+                        iccid_limpio = ""
+                        for char in iccid:
+                            if char.isdigit() or char in ['F', 'f']:
+                                iccid_limpio += char
+                            else:
+                                break
+                        
+                        if len(iccid_limpio) >= 15:
+                            resultado["iccid"] = iccid_limpio
+                            return resultado
+        
+        return resultado
+        
+    except Exception as e:
+        resultado["error"] = str(e)
+        return resultado
+
+def obtener_iccids_actuales():
+    """Obtiene todos los ICCIDs actuales de los módems"""
+    try:
+        import serial.tools.list_ports
+        
+        # Obtener todos los puertos COM disponibles
+        puertos_disponibles = [puerto.device for puerto in serial.tools.list_ports.comports()]
+        
+        # Excluir los puertos de los controladores SimBank
+        controladores_simbank = [config["com"] for config in RotadorSimBank.SIM_BANKS.values()]
+        puertos_modems = [p for p in puertos_disponibles if p not in controladores_simbank]
+        
+        log_detallado(f"Leyendo ICCIDs de {len(puertos_modems)} módems...")
+        
+        iccids_info = []
+        for puerto in puertos_modems:
+            info = obtener_iccid_puerto(puerto)
+            if info["iccid"]:
+                iccids_info.append(info)
+                log_detallado(f"  {puerto}: {info['iccid']}")
+            elif info["error"]:
+                log_detallado(f"  {puerto}: ERROR - {info['error']}")
+            else:
+                log_detallado(f"  {puerto}: Sin respuesta o ICCID no detectado")
+        
+        # Detectar duplicados
+        iccids = [info["iccid"] for info in iccids_info]
+        duplicados = set([x for x in iccids if iccids.count(x) > 1])
+        
+        if duplicados:
+            log_detallado(f"⚠️  DUPLICADOS DETECTADOS: {len(duplicados)} ICCIDs repetidos")
+            for dup in duplicados:
+                puertos_dup = [info["puerto"] for info in iccids_info if info["iccid"] == dup]
+                log_detallado(f"  ICCID {dup}: {', '.join(puertos_dup)}")
+        else:
+            log_detallado(f"✅ No hay ICCIDs duplicados ({len(iccids)} únicos)")
+        
+        return iccids_info
+        
+    except Exception as e:
+        log_detallado(f"❌ Error obteniendo ICCIDs: {e}")
+        return []
 
 def reiniciar_modems_cfun():
     """Reinicia todos los módems con AT+CFUN=1,1 para forzar detección de nueva SIM"""
@@ -96,31 +216,38 @@ def reiniciar_modems_cfun():
         puertos_modems = [p for p in puertos_disponibles if p not in controladores_simbank]
         
         print(f"  🔄 Reiniciando {len(puertos_modems)} módems con AT+CFUN=1,1...")
+        log_detallado(f"Enviando AT+CFUN=1,1 a {len(puertos_modems)} módems...")
         
         reiniciados = 0
         errores = 0
+        errores_detalle = []
         
-        # Reiniciar todos los módems en paralelo (más rápido)
+        # Reiniciar todos los módems
         for puerto_modem in puertos_modems:
             try:
-                ser = serial.Serial(
-                    port=puerto_modem,
-                    baudrate=115200,
-                    timeout=1
-                )
-                ser.write(b"AT+CFUN=1,1\r\n")
-                time.sleep(0.1)
-                ser.close()
-                reiniciados += 1
-            except Exception:
+                respuesta = enviar_comando_at(puerto_modem, "AT+CFUN=1,1", timeout=1.0)
+                
+                if "OK" in respuesta or respuesta == "":
+                    log_detallado(f"  ✅ {puerto_modem}: OK")
+                    reiniciados += 1
+                else:
+                    log_detallado(f"  ⚠️  {puerto_modem}: {respuesta[:50]}")
+                    reiniciados += 1
+                    
+            except Exception as e:
+                log_detallado(f"  ❌ {puerto_modem}: {str(e)}")
                 errores += 1
+                errores_detalle.append(f"{puerto_modem}: {str(e)}")
                 continue
         
         print(f"  ✅ Reiniciados: {reiniciados} | ❌ Errores: {errores}")
+        log_detallado(f"Resumen: {reiniciados} reiniciados, {errores} errores")
+        
         return reiniciados > 0
         
     except Exception as e:
         print(f"  ⚠️ Error reiniciando módems: {e}")
+        log_detallado(f"❌ Error crítico: {e}")
         return False
 
 def cambiar_slot_pool_rapido(pool_name: str, pool_config: dict, slot_base: int) -> dict:
@@ -134,12 +261,18 @@ def cambiar_slot_pool_rapido(pool_name: str, pool_config: dict, slot_base: int) 
     slot_formateado = f"{slot_real:04d}"
     
     print(f"  📡 {pool_name}: Cambiando a slot {slot_real:02d} (COM: {sim_bank_com})")
+    log_detallado(f"")
+    log_detallado(f"{'='*60}")
+    log_detallado(f"{pool_name}: Cambio a slot {slot_real:02d}")
+    log_detallado(f"SimBank COM: {sim_bank_com}")
+    log_detallado(f"Offset: {offset_slot}, Slot base: {slot_base}, Slot real: {slot_real}")
     
     resultado = {
         "pool": pool_name,
         "slot_real": slot_real,
         "exitoso": False,
-        "cambios_detectados": 0
+        "comandos_enviados": [],
+        "respuestas": []
     }
     
     try:
@@ -154,17 +287,39 @@ def cambiar_slot_pool_rapido(pool_name: str, pool_config: dict, slot_base: int) 
         
         # Cambiar cada puerto lógico
         for puerto_logico in puertos_logicos:
-            comando = f"AT+SWIT{puerto_logico}-{slot_formateado}\r\n"
-            ser.write(comando.encode())
-            time.sleep(0.2)  # Reducido de 0.3 a 0.2
+            comando = f"AT+SWIT{puerto_logico}-{slot_formateado}"
+            comando_completo = f"{comando}\r\n"
+            
+            log_detallado(f"  → Enviando: {comando}")
+            
+            ser.write(comando_completo.encode())
+            time.sleep(0.3)
+            
+            # Intentar leer respuesta
+            try:
+                respuesta = ser.read(100).decode('utf-8', errors='ignore').strip()
+                if respuesta:
+                    log_detallado(f"  ← Respuesta: {respuesta}")
+                    resultado["respuestas"].append(respuesta)
+                else:
+                    log_detallado(f"  ← Sin respuesta")
+            except:
+                log_detallado(f"  ← No se pudo leer respuesta")
+            
+            resultado["comandos_enviados"].append(comando)
         
         ser.close()
         resultado["exitoso"] = True
-        print(f"  ✅ {pool_name}: Comandos enviados al slot {slot_real:02d}")
+        print(f"  ✅ {pool_name}: {len(puertos_logicos)} comandos enviados al slot {slot_real:02d}")
+        log_detallado(f"✅ {pool_name}: Completado - {len(puertos_logicos)} comandos enviados")
+        log_detallado(f"{'='*60}")
+        
         return resultado
         
     except Exception as e:
         print(f"  ❌ {pool_name}: Error - {e}")
+        log_detallado(f"❌ {pool_name}: ERROR - {str(e)}")
+        log_detallado(f"{'='*60}")
         return resultado
 
 def capturar_pantalla(carpeta: str, slot: int):
@@ -200,38 +355,82 @@ def procesar_slot_rapido(slot: int, carpeta_capturas: str, sim_banks: dict):
     print(f"🔄 PROCESANDO SLOT {slot:02d}/{TOTAL_SLOTS} ({(slot/TOTAL_SLOTS)*100:.1f}%)")
     print(f"{'='*80}")
     
+    log_detallado(f"\n\n{'#'*80}")
+    log_detallado(f"# SLOT {slot:02d}/{TOTAL_SLOTS} - {datetime.now().strftime('%H:%M:%S')}")
+    log_detallado(f"{'#'*80}\n")
+    
     # 1. Cerrar HeroSMS
     print("1️⃣ Cerrando HeroSMS...")
+    log_detallado("PASO 1: Cerrando HeroSMS...")
     cerrar_simclient()
     cerrar_puertos_serial()
-    time.sleep(1)  # Reducido de 2 a 1
+    time.sleep(1)
+    log_detallado("HeroSMS cerrado y puertos liberados")
+    
+    # 1.5. Leer ICCIDs ANTES del cambio
+    print("  📋 Leyendo ICCIDs ANTES del cambio...")
+    log_detallado("\n--- ICCIDs ANTES DEL CAMBIO ---")
+    iccids_antes = obtener_iccids_actuales()
     
     # 2. Rotar todos los pools al slot
     print(f"2️⃣ Rotando todos los pools al slot {slot:02d}...")
+    log_detallado(f"\nPASO 2: Rotando todos los pools al slot {slot:02d}...")
     resultados = []
     for pool_name, pool_config in sim_banks.items():
         resultado = cambiar_slot_pool_rapido(pool_name, pool_config, slot)
         resultados.append(resultado)
     
-    # Esperar menos tiempo (cambio físico de slots)
+    # Esperar cambio físico
     print(f"  ⏳ Esperando 15 segundos para aplicar cambios físicos...")
-    time.sleep(15)  # Reducido de 10 a 15 (balance)
+    log_detallado("\nEsperando 15 segundos para estabilización mecánica...")
+    time.sleep(15)
     
     # 3. Reiniciar módems para forzar detección de nueva SIM
     print("3️⃣ Reiniciando módems (AT+CFUN=1,1) para detectar nueva SIM...")
+    log_detallado("\nPASO 3: Reiniciando módems con AT+CFUN=1,1...")
     reiniciar_modems_cfun()
     print(f"  ⏳ Esperando 30 segundos para reinicio de módems...")
-    time.sleep(30)  # Tiempo para que módems reinicien y detecten SIM
+    log_detallado("Esperando 30 segundos para reinicio completo...")
+    time.sleep(30)
+    
+    # 3.5. Leer ICCIDs DESPUÉS del reinicio
+    print("  📋 Leyendo ICCIDs DESPUÉS del reinicio...")
+    log_detallado("\n--- ICCIDs DESPUÉS DEL REINICIO ---")
+    iccids_despues = obtener_iccids_actuales()
+    
+    # Comparar ICCIDs antes y después
+    log_detallado("\n--- ANÁLISIS DE CAMBIOS ---")
+    if len(iccids_antes) > 0 and len(iccids_despues) > 0:
+        iccids_antes_set = set([info["iccid"] for info in iccids_antes if info["iccid"]])
+        iccids_despues_set = set([info["iccid"] for info in iccids_despues if info["iccid"]])
+        
+        nuevos = iccids_despues_set - iccids_antes_set
+        desaparecidos = iccids_antes_set - iccids_despues_set
+        sin_cambio = iccids_antes_set & iccids_despues_set
+        
+        log_detallado(f"ICCIDs detectados ANTES: {len(iccids_antes_set)}")
+        log_detallado(f"ICCIDs detectados DESPUÉS: {len(iccids_despues_set)}")
+        log_detallado(f"ICCIDs NUEVOS (cambiaron): {len(nuevos)}")
+        log_detallado(f"ICCIDs que DESAPARECIERON: {len(desaparecidos)}")
+        log_detallado(f"ICCIDs SIN CAMBIO: {len(sin_cambio)}")
+        
+        if len(sin_cambio) > 0:
+            log_detallado(f"⚠️  ADVERTENCIA: {len(sin_cambio)} ICCIDs no cambiaron:")
+            for iccid in list(sin_cambio)[:5]:  # Mostrar solo primeros 5
+                log_detallado(f"  - {iccid}")
     
     # 4. Abrir HeroSMS
     print("4️⃣ Abriendo HeroSMS...")
+    log_detallado("\nPASO 4: Abriendo HeroSMS...")
     abrir_simclient()
+    log_detallado("HeroSMS iniciado")
     
-    # 5. Espera inteligente (verificar cada 30 segundos si hay módems detectados)
+    # 5. Espera inteligente
     print(f"5️⃣ Esperando {TIEMPO_ESPERA_MINUTOS} minutos para detección...")
+    log_detallado(f"\nPASO 5: Esperando {TIEMPO_ESPERA_MINUTOS} minutos para registro en red...")
     tiempo_total = TIEMPO_ESPERA_MINUTOS * 60
     tiempo_transcurrido = 0
-    intervalo_check = 30  # Verificar cada 30 segundos
+    intervalo_check = 30
     
     while tiempo_transcurrido < tiempo_total:
         tiempo_restante = tiempo_total - tiempo_transcurrido
@@ -239,19 +438,34 @@ def procesar_slot_rapido(slot: int, carpeta_capturas: str, sim_banks: dict):
         segundos = tiempo_restante % 60
         print(f"  ⏳ {minutos}m {segundos}s restantes...")
         
-        # Esperar el intervalo
         espera = min(intervalo_check, tiempo_restante)
         time.sleep(espera)
         tiempo_transcurrido += espera
     
+    log_detallado("Tiempo de espera completado")
+    
+    # 5.5. Leer ICCIDs FINALES (antes de captura)
+    print("  📋 Leyendo ICCIDs FINALES antes de captura...")
+    log_detallado("\n--- ICCIDs FINALES (ANTES DE CAPTURA) ---")
+    iccids_finales = obtener_iccids_actuales()
+    
     # 6. Capturar pantalla
     print("6️⃣ Capturando pantalla...")
+    log_detallado("\nPASO 6: Capturando pantalla...")
     capturar_pantalla(carpeta_capturas, slot)
     
-    # 7. Cerrar HeroSMS (rápido)
+    # 7. Cerrar HeroSMS
     print("7️⃣ Cerrando HeroSMS...")
+    log_detallado("\nPASO 7: Cerrando HeroSMS...")
     cerrar_simclient()
     cerrar_puertos_serial()
+    log_detallado("HeroSMS cerrado")
+    
+    # Resumen del slot
+    log_detallado(f"\n{'='*80}")
+    log_detallado(f"SLOT {slot:02d} COMPLETADO - {datetime.now().strftime('%H:%M:%S')}")
+    log_detallado(f"ICCIDs únicos detectados: {len(set([i['iccid'] for i in iccids_finales if i['iccid']]))}")
+    log_detallado(f"{'='*80}\n")
     
     print(f"✅ Slot {slot:02d} completado!")
     time.sleep(1)  # Reducido de 2 a 1
