@@ -88,17 +88,18 @@ class Settings:
     
     # Tiempos (en minutos o segundos según contexto)
     INTERVALO_MINUTOS = 30
-    TIEMPO_APLICAR_SLOT = 10  # Aumentado de 5 a 10 (switches mecánicos necesitan más tiempo)
-    TIEMPO_ESTABILIZACION_FINAL = 15  # Aumentado de 8 a 15 (más tiempo para registro en red)
-    TIEMPO_ANTES_SIMCLIENT = 3
-    TIEMPO_SIMCLIENT_DETECTAR = 8
+    TIEMPO_APLICAR_SLOT = 25  # OPTIMIZADO PARA UC20: Switches mecánicos + detección de nueva SIM (era 10)
+    TIEMPO_CFUN_RESET = 90  # NUEVO: Tiempo después de AT+CFUN=1,1 para reinicio completo UC20 (era implícito en TIEMPO_APLICAR_SLOT)
+    TIEMPO_ESTABILIZACION_FINAL = 20  # OPTIMIZADO PARA UC20: Más tiempo para registro en red (era 15)
+    TIEMPO_ANTES_SIMCLIENT = 5  # OPTIMIZADO PARA UC20: Más tiempo antes de abrir HeroSMS (era 3)
+    TIEMPO_SIMCLIENT_DETECTAR = 10  # OPTIMIZADO PARA UC20: Más tiempo para detección (era 8)
     
     # Reintentos y timeouts
-    MAX_INTENTOS_SIM = 15
+    MAX_INTENTOS_SIM = 25  # OPTIMIZADO PARA UC20: Más intentos (era 20) - UC20 más lento que M35
     MAX_INTENTOS_COMANDO_AT = 3
-    MAX_INTENTOS_REGISTRO_RED = 15  # Nuevo: intentos para verificar registro en red
+    MAX_INTENTOS_REGISTRO_RED = 30  # OPTIMIZADO PARA UC20: Más intentos para registro (era 20) - UC20 más lento que M35
     MAX_INTENTOS_CAMBIO_SLOT = 3  # Nuevo: intentos para verificar cambio de ICCID
-    TIMEOUT_SERIAL = 3
+    TIMEOUT_SERIAL = 4  # OPTIMIZADO PARA UC20: Más timeout (era 3)
     BAUDRATE = 115200
     
     # Delays mejorados (fix para CME ERROR: 14)
@@ -125,10 +126,10 @@ class Settings:
     ACTIVAR_SIMS_CLARO = True  # Activar SIMs Claro automáticamente después de cambiar slot
     MODO_ACTIVACION_MASIVA = True  # Modo por defecto: activar todas las 1024 SIMs sin abrir/cerrar programa
     
-    # Activación de SIMs
-    INTENTOS_ACTIVACION = 5  # Aumentado de 3 a 5 (más oportunidades)
-    ESPERA_ENTRE_INTENTOS = 15  # Aumentado de 10 a 15 (más tiempo para SMS)
-    ESPERA_DESPUES_ACTIVACION = 20  # Nuevo: tiempo de espera después de enviar USSD
+    # Activación de SIMs (OPTIMIZADO PARA UC20)
+    INTENTOS_ACTIVACION = 5  # Aumentado de 3 a 5 (más oportunidades para UC20)
+    ESPERA_ENTRE_INTENTOS = 20  # OPTIMIZADO PARA UC20: Más tiempo para SMS (era 15)
+    ESPERA_DESPUES_ACTIVACION = 30  # OPTIMIZADO PARA UC20: Más tiempo después de USSD (era 20)
     LOG_ACTIVACION = "log_activacion_rotador.txt"  # Log específico de activaciones
     
     # Base de datos PostgreSQL
@@ -1357,7 +1358,11 @@ def cerrar_puertos_serial():
     time.sleep(2)
 
 def enviar_comando(puerto: str, comando: str, espera: float = 1) -> str:
-    """Envía un comando AT al puerto especificado y devuelve la respuesta cruda."""
+    """Envía un comando AT al puerto especificado y devuelve la respuesta cruda.
+    
+    OPTIMIZADO PARA HEROSMS JAVA: Line terminator \r (no \r\n)
+    Según análisis de sim/simbank/f.java línea 32: writeString("\r")
+    """
     if Settings.MODO_DRY_RUN:
         escribir_log(f"[DRY RUN] {puerto} ← {comando}")
         return "OK"
@@ -1368,8 +1373,8 @@ def enviar_comando(puerto: str, comando: str, espera: float = 1) -> str:
             ser.reset_input_buffer()
             ser.reset_output_buffer()
             
-            # Enviar comando
-            ser.write((comando + "\r\n").encode())
+            # Enviar comando con line terminator compatible con HeroSMS Java (\r solamente)
+            ser.write((comando + "\r").encode())
             time.sleep(espera)
             
             # Leer respuesta
@@ -1409,18 +1414,21 @@ def enviar_comando_resiliente(puerto: str, comando: str, intentos: int = None) -
     return respuesta if 'respuesta' in locals() else ""
 
 def revisar_puerto(puerto):
-    """Verifica si un puerto responde al comando AT y lo reinicia"""
+    """Verifica si un puerto responde al comando AT y lo reinicia
+    
+    OPTIMIZADO PARA HEROSMS JAVA: Line terminator \r (compatible con dq.java)
+    """
     try:
         with serial.Serial(puerto, baudrate=115200, timeout=2) as ser:
-            ser.write(b"AT\r\n")
+            ser.write(b"AT\r")
             time.sleep(1)
             respuesta = ser.read_all().decode(errors="ignore").strip()
             
             if "OK" in respuesta:
                 escribir_log(f"✅ [{puerto}] Módem responde OK")
-                # Reiniciar módem
-                ser.write(b"AT+CFUN=1,1\r\n")
-                escribir_log(f"🔄 [{puerto}] Módem reiniciado")
+                # Reiniciar módem con AT+CFUN=1,1 (como en dq.java línea 29)
+                ser.write(b"AT+CFUN=1,1\r")
+                escribir_log(f"🔄 [{puerto}] Módem reiniciado con AT+CFUN=1,1")
                 return True
             else:
                 escribir_log(f"⚠️ [{puerto}] No respondió al comando AT")
@@ -1429,15 +1437,20 @@ def revisar_puerto(puerto):
         escribir_log(f"❌ [{puerto}] Error al validar: {e}")
         return False
 
-def esperar_sim_lista(puerto, max_intentos=15):
-    """Espera hasta que la SIM esté lista y detectada correctamente"""
+def esperar_sim_lista(puerto, max_intentos=25):
+    """Espera hasta que la SIM esté lista y detectada correctamente
+    
+    OPTIMIZADO PARA UC20: max_intentos aumentado a 25 (era 20)
+    UC20 tarda más en detectar SIMs después de cambiar slot que M35
+    Line terminator \r compatible con HeroSMS Java (dv.java)
+    """
     escribir_log(f"⏳ [{puerto}] Esperando detección de SIM...")
     
     for intento in range(max_intentos):
         try:
             with serial.Serial(puerto, baudrate=115200, timeout=2) as ser:
-                # Verificar estado de SIM
-                ser.write(b"AT+CPIN?\r\n")
+                # Verificar estado de SIM (como en dv.java - AT+CPIN?)
+                ser.write(b"AT+CPIN?\r")
                 time.sleep(0.8)
                 respuesta = ser.read_all().decode(errors="ignore").strip()
                 
@@ -1460,10 +1473,14 @@ def esperar_sim_lista(puerto, max_intentos=15):
     return False
 
 def obtener_iccid_modem(puerto):
-    """Obtiene el ICCID del módem para verificar que cambió"""
+    """Obtiene el ICCID del módem para verificar que cambió
+    
+    OPTIMIZADO PARA HEROSMS JAVA: AT+QCCID con line terminator \r
+    Según m.java línea 221: return "AT+QCCID" para Quectel UC20
+    """
     try:
         with serial.Serial(puerto, baudrate=115200, timeout=2) as ser:
-            ser.write(b"AT+QCCID\r\n")
+            ser.write(b"AT+QCCID\r")
             time.sleep(1)
             respuesta = ser.read_all().decode(errors="ignore").strip()
             
@@ -1482,10 +1499,13 @@ def obtener_iccid_modem(puerto):
         return None
 
 def obtener_iccid_modem_rapido(puerto, timeout=1.5):
-    """Obtiene el ICCID del módem de forma rápida (sin log) para verificación"""
+    """Obtiene el ICCID del módem de forma rápida (sin log) para verificación
+    
+    OPTIMIZADO PARA HEROSMS JAVA: AT+QCCID con line terminator \r
+    """
     try:
         with serial.Serial(puerto, baudrate=115200, timeout=timeout) as ser:
-            ser.write(b"AT+QCCID\r\n")
+            ser.write(b"AT+QCCID\r")
             time.sleep(0.8)
             respuesta = ser.read_all().decode(errors="ignore").strip()
             
@@ -1497,8 +1517,12 @@ def obtener_iccid_modem_rapido(puerto, timeout=1.5):
     except Exception:
         return None
 
-def esperar_registro_red(puerto: str, max_intentos: int = 15) -> bool:
-    """Espera hasta que el módem esté registrado en red antes de enviar USSD"""
+def esperar_registro_red(puerto: str, max_intentos: int = 30) -> bool:
+    """Espera hasta que el módem esté registrado en red antes de enviar USSD
+    
+    OPTIMIZADO PARA UC20: max_intentos aumentado a 30 (era 15)
+    UC20 tarda más en registrarse que M35, especialmente en ubicación con señal débil
+    """
     if Settings.MODO_DRY_RUN:
         return True
     
@@ -1539,6 +1563,47 @@ def esperar_registro_red(puerto: str, max_intentos: int = 15) -> bool:
     
     log_activacion(f"❌ [{puerto}] Timeout esperando registro en red ({max_intentos * 2}s)")
     return False
+
+def verificar_registro_modems_global(modems_activos: list) -> tuple:
+    """Verifica el registro en red de TODOS los módems en paralelo
+    
+    NUEVO: Compatible con flujo de HeroSMS Java (dv.java)
+    Retorna: (registrados, sin_registrar)
+    """
+    if Settings.MODO_DRY_RUN:
+        return len(modems_activos), 0
+    
+    registrados = 0
+    sin_registrar = 0
+    registrados_lock = threading.Lock()
+    
+    def verificar_uno(puerto):
+        nonlocal registrados, sin_registrar
+        try:
+            respuesta = enviar_comando(puerto, "AT+CREG?", espera=0.5)
+            if "+CREG:" in respuesta:
+                match = re.search(r'\+CREG:\s*\d+,(\d+)', respuesta)
+                if match:
+                    estado = match.group(1)
+                    with registrados_lock:
+                        if estado in ["1", "5"]:  # 1=home, 5=roaming
+                            registrados += 1
+                        else:
+                            sin_registrar += 1
+        except:
+            with registrados_lock:
+                sin_registrar += 1
+    
+    hilos = []
+    for puerto in modems_activos:
+        hilo = threading.Thread(target=verificar_uno, args=(puerto,))
+        hilo.start()
+        hilos.append(hilo)
+    
+    for hilo in hilos:
+        hilo.join()
+    
+    return registrados, sin_registrar
 
 def verificar_intensidad_senal(puerto: str) -> int:
     """Verifica la intensidad de señal del módem (0-31, 99=desconocido)"""
@@ -1698,7 +1763,9 @@ def cambiar_slot_pool(pool_name: str, pool_config: dict, slot_base: int):
     comandos_error = 0
     
     for puerto_logico in puertos_logicos:
-        comando = f"AT+SWIT{puerto_logico}-{slot_formateado}"
+        # FORMATO JAVA: AT+SWIT%02d-%04d (puerto con 2 dígitos, slot con 4)
+        puerto_formateado = f"{int(puerto_logico):02d}" if isinstance(puerto_logico, str) else f"{puerto_logico:02d}"
+        comando = f"AT+SWIT{puerto_formateado}-{slot_formateado}"
         respuesta = enviar_comando(sim_bank_com, comando, espera=1.0)
         
         # Verificar si el comando fue exitoso
@@ -1733,7 +1800,9 @@ def cambiar_slot_pool(pool_name: str, pool_config: dict, slot_base: int):
         
         # Reenviar comandos SWIT
         for puerto_logico in puertos_logicos:
-            comando = f"AT+SWIT{puerto_logico}-{slot_formateado}"
+            # FORMATO JAVA: AT+SWIT%02d-%04d
+            puerto_formateado = f"{int(puerto_logico):02d}" if isinstance(puerto_logico, str) else f"{puerto_logico:02d}"
+            comando = f"AT+SWIT{puerto_formateado}-{slot_formateado}"
             enviar_comando(sim_bank_com, comando, espera=1.0)
             time.sleep(0.5)
         
@@ -1967,6 +2036,16 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
     
     console.print(f"[green]✅ Módems reiniciados: {modems_ok}/{len(modems_activos)}[/green]")
     
+    # 7.5 NUEVO: Esperar tiempo adicional después de AT+CFUN=1,1 (como test_capturas_rapido.py)
+    console.print(f"[bold blue]⏳ Esperando {Settings.TIEMPO_CFUN_RESET}s para reinicio completo (UC20)...[/bold blue]")
+    escribir_log(f"Esperando {Settings.TIEMPO_CFUN_RESET}s para:")
+    escribir_log("  - Reinicio del módulo")
+    escribir_log("  - Detección de nueva SIM (ICCID)")
+    escribir_log("  - Inicialización de stack GSM")
+    escribir_log("  - Búsqueda de red")
+    time.sleep(Settings.TIEMPO_CFUN_RESET)
+    escribir_log("✅ Reinicio completado")
+    
     # 8. Esperar a que los módems detecten las nuevas SIM
     console.print("[bold blue]🔍 Paso 2/3: Esperando detección de SIM en todos los módems...[/bold blue]")
     console.print("[yellow]⏳ Esto puede tomar 20-40 segundos (modo prueba)...[/yellow]")
@@ -1976,8 +2055,8 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
     
     def esperar_sim_y_verificar(puerto):
         nonlocal sims_listas
-        # Esperar a que la SIM esté lista (modo prueba: 15 intentos)
-        if esperar_sim_lista(puerto, max_intentos=15):
+        # Esperar a que la SIM esté lista (OPTIMIZADO UC20: 20 intentos)
+        if esperar_sim_lista(puerto, max_intentos=20):
             # Obtener ICCID para confirmar cambio
             iccid = obtener_iccid_modem(puerto)
             if iccid:
@@ -2013,6 +2092,39 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
             console.print(f"[dim]   {puerto}: {iccid}[/dim]")
         if len(iccids_verificados) > 5:
             console.print(f"[dim]   ... y {len(iccids_verificados) - 5} más[/dim]")
+    
+    # 8.5 NUEVO: Verificar registro en red (compatible con HeroSMS Java dv.java)
+    console.print("[bold blue]🔍 Paso 2.5/3: Verificando registro en red...[/bold blue]")
+    registrados, sin_registrar = verificar_registro_modems_global(modems_activos)
+    console.print(f"[cyan]📊 {registrados} registrados | {sin_registrar} sin registrar[/cyan]")
+    escribir_log(f"📊 Registro inicial: {registrados}/{len(modems_activos)} registrados")
+    
+    # Esperar hasta que al menos 70% estén registrados (tolerancia para ubicación con señal débil)
+    intentos_registro = 0
+    max_intentos_registro = 4
+    umbral_objetivo = 0.70  # 70% es aceptable para UC20 en señal débil
+    
+    while registrados < len(modems_activos) * umbral_objetivo and intentos_registro < max_intentos_registro:
+        intentos_registro += 1
+        tiempo_espera = 60
+        
+        porcentaje_actual = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
+        escribir_log(f"⚠️  Solo {registrados}/{len(modems_activos)} registrados ({porcentaje_actual:.0f}%). Esperando {tiempo_espera}s más... (intento {intentos_registro}/{max_intentos_registro})")
+        console.print(f"[yellow]  ⏳ Esperando {tiempo_espera}s adicionales para más registros (intento {intentos_registro}/{max_intentos_registro})...[/yellow]")
+        time.sleep(tiempo_espera)
+        
+        registrados, sin_registrar = verificar_registro_modems_global(modems_activos)
+        porcentaje_actual = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
+        console.print(f"[cyan]  📊 Ahora: {registrados} registrados | {sin_registrar} sin registrar ({porcentaje_actual:.0f}%)[/cyan]")
+    
+    porcentaje_final = (registrados / len(modems_activos)) * 100 if len(modems_activos) > 0 else 0
+    if registrados >= len(modems_activos) * umbral_objetivo:
+        escribir_log(f"✅ Objetivo alcanzado: {registrados}/{len(modems_activos)} módems registrados ({porcentaje_final:.0f}%)")
+        console.print(f"[green]✅ Registro en red: {registrados}/{len(modems_activos)} ({porcentaje_final:.0f}%)[/green]")
+    else:
+        escribir_log(f"⚠️  Solo {registrados}/{len(modems_activos)} módems registrados ({porcentaje_final:.0f}%) después de {intentos_registro * 60}s")
+        console.print(f"[yellow]⚠️  Registro limitado: {registrados}/{len(modems_activos)} ({porcentaje_final:.0f}%)[/yellow]")
+        console.print(f"[yellow]   Posible problema de señal/antenas (ver diagnóstico)[/yellow]")
     
     # 9. ACTIVACIÓN DE SIMS CLARO (si está habilitada)
     if Settings.ACTIVAR_SIMS_CLARO and iccids_verificados:
