@@ -853,6 +853,40 @@ def crear_tabla_db():
     except Exception as e:
         escribir_log(f"⚠️ Error al crear tabla en base de datos: {e}")
 
+def verificar_iccid_ya_activado(iccid: str) -> tuple:
+    """Verifica si un ICCID ya fue activado previamente en la base de datos.
+    Retorna: (ya_activado: bool, numero_existente: str)
+    """
+    if not Settings.DB_ENABLED:
+        return False, None
+    
+    try:
+        conn = conectar_db()
+        if not conn:
+            return False, None
+        
+        cursor = conn.cursor()
+        
+        # Buscar el ICCID en la base de datos
+        cursor.execute(
+            f"SELECT numero_telefono FROM {Settings.DB_TABLE} WHERE iccid = %s", 
+            (iccid,)
+        )
+        resultado = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if resultado:
+            numero = resultado[0]
+            return True, numero
+        else:
+            return False, None
+            
+    except Exception as e:
+        log_activacion(f"⚠️ Error verificando ICCID en BD: {e}")
+        return False, None
+
 def guardar_numero_db(iccid: str, numero: str, puerto: str) -> bool:
     """Guarda o actualiza un número en la base de datos PostgreSQL.
     Retorna True si se guardó correctamente.
@@ -1246,8 +1280,15 @@ def guardar_numero_en_sim(puerto: str, numero: str, iccid: str) -> bool:
         return False
 
 @medir_tiempo
-def procesar_activacion_sim(puerto: str) -> dict:
-    """Proceso completo de activación de una SIM"""
+def procesar_activacion_sim(puerto: str, iccid_anterior: str = None) -> dict:
+    """Proceso completo de activación de una SIM
+    
+    NUEVO: Verifica que el ICCID cambió antes de activar (previene activar misma SIM)
+    
+    Args:
+        puerto: Puerto COM del módem
+        iccid_anterior: ICCID antes del cambio de slot (para verificar que cambió)
+    """
     resultado = {
         "puerto": puerto,
         "iccid": None,
@@ -1257,13 +1298,25 @@ def procesar_activacion_sim(puerto: str) -> dict:
     }
     
     try:
-        # 1. Obtener ICCID (verifica que SIM responde - fix para CMS ERROR: 500)
+        # 1. Obtener ICCID ACTUAL (después de AT+CFUN=1,1 que ya se ejecutó en cambiar_slot_simbank)
         iccid = obtener_iccid_modem(puerto)
         if not iccid:
             log_activacion(f"❌ [{puerto}] No se pudo obtener ICCID")
             return resultado
         
         resultado["iccid"] = iccid
+        
+        # 1.5 NUEVO: VERIFICAR QUE EL ICCID CAMBIÓ (si se proporcionó iccid_anterior)
+        if iccid_anterior:
+            if iccid == iccid_anterior:
+                log_activacion(f"⚠️ [{puerto}] ICCID NO CAMBIÓ: {iccid}")
+                log_activacion(f"⏭️  [{puerto}] Saltando activación (misma SIM, slot no cambió)")
+                return resultado
+            else:
+                log_activacion(f"✅ [{puerto}] ICCID CAMBIÓ correctamente:")
+                log_activacion(f"   Anterior: {iccid_anterior}")
+                log_activacion(f"   Nuevo:    {iccid}")
+        
         operador = obtener_operador(iccid)
         
         if operador != "Claro":
@@ -1271,30 +1324,57 @@ def procesar_activacion_sim(puerto: str) -> dict:
             resultado["activado"] = True
             return resultado
         
-        # 2. VERIFICAR SI YA TIENE NÚMERO GUARDADO EN "myphone"
+        # 2. VERIFICAR SI ESTE ICCID YA FUE ACTIVADO EN LA BASE DE DATOS
+        ya_activado, numero_bd = verificar_iccid_ya_activado(iccid)
+        if ya_activado:
+            log_activacion(f"✅ [{puerto}] ICCID {iccid} YA ACTIVADO en BD con número: {numero_bd}")
+            log_activacion(f"⏭️  [{puerto}] Saltando activación (ya procesado anteriormente)")
+            resultado["numero"] = numero_bd
+            resultado["activado"] = True
+            resultado["intentos"] = 0
+            
+            # Guardar en "myphone" si no lo tiene
+            numero_en_sim = leer_contacto_myphone(puerto)
+            if not numero_en_sim:
+                log_activacion(f"📲 [{puerto}] Guardando número {numero_bd} en SIM (myphone)...")
+                try:
+                    enviar_comando(puerto, 'AT+CPBS="SM"', espera=0.5)
+                    comando_guardar = f'AT+CPBW=1,"{numero_bd}",129,"myphone"'
+                    enviar_comando(puerto, comando_guardar, espera=1)
+                except Exception as e:
+                    log_activacion(f"⚠️ [{puerto}] Error guardando en SIM: {e}")
+            
+            return resultado
+        
+        # 3. VERIFICAR SI YA TIENE NÚMERO GUARDADO EN "myphone"
         numero_existente = leer_contacto_myphone(puerto)
         if numero_existente:
             log_activacion(f"✅ [{puerto}] SIM ya activada con número: {numero_existente}")
+            # Guardar en BD por si no estaba
+            guardar_numero_db(iccid, numero_existente, puerto)
             resultado["numero"] = numero_existente
             resultado["activado"] = True
             resultado["intentos"] = 0  # No necesitó intentos, ya estaba activada
             return resultado
         
-        # 3. BORRAR MENSAJES DEL MÓDEM (ahora que SIM está confirmada como lista)
+        # 4. Si llegamos aquí, es un ICCID nuevo que requiere activación
+        log_activacion(f"🆕 [{puerto}] ICCID {iccid} es NUEVO, procediendo con activación...")
+        
+        # 5. BORRAR MENSAJES DEL MÓDEM (ahora que SIM está confirmada como lista)
         # Esto previene leer SMS de la SIM anterior
         borrar_mensajes_modem(puerto)
         
-        # 4. VERIFICAR REGISTRO EN RED (CRÍTICO para activación exitosa)
+        # 6. VERIFICAR REGISTRO EN RED (CRÍTICO para activación exitosa)
         log_activacion(f"🔍 [{puerto}] Esperando registro en red antes de activar...")
         if not esperar_registro_red(puerto, max_intentos=15):
             log_activacion(f"❌ [{puerto}] No se pudo registrar en red - Saltando activación")
             resultado["intentos"] = 0
             return resultado
         
-        # 5. VERIFICAR SEÑAL (opcional, para diagnóstico)
+        # 7. VERIFICAR SEÑAL (opcional, para diagnóstico)
         verificar_intensidad_senal(puerto)
         
-        # 6. Intentar activación
+        # 8. Intentar activación
         for intento in range(Settings.INTENTOS_ACTIVACION):
             resultado["intentos"] = intento + 1
             log_activacion(f"🔄 [{puerto}] Intento {intento + 1}/{Settings.INTENTOS_ACTIVACION}")
@@ -2046,20 +2126,51 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
     time.sleep(Settings.TIEMPO_CFUN_RESET)
     escribir_log("✅ Reinicio completado")
     
-    # 8. Esperar a que los módems detecten las nuevas SIM
-    console.print("[bold blue]🔍 Paso 2/3: Esperando detección de SIM en todos los módems...[/bold blue]")
-    console.print("[yellow]⏳ Esto puede tomar 20-40 segundos (modo prueba)...[/yellow]")
+    # 8. NUEVO: Leer ICCIDs ANTES del cambio (para verificar que cambien después)
+    console.print("[bold blue]🔍 Paso 2/3a: Leyendo ICCIDs ANTES del cambio de slot...[/bold blue]")
+    iccids_antes_cambio = {}
+    
+    def leer_iccid_previo(puerto):
+        iccid = obtener_iccid_modem_rapido(puerto, timeout=1.5)
+        if iccid:
+            iccids_antes_cambio[puerto] = iccid
+    
+    hilos_lectura_previa = []
+    for puerto_modem in modems_activos[:10]:  # Muestra de 10 módems
+        hilo = threading.Thread(target=leer_iccid_previo, args=(puerto_modem,))
+        hilo.start()
+        hilos_lectura_previa.append(hilo)
+    
+    for hilo in hilos_lectura_previa:
+        hilo.join()
+    
+    escribir_log(f"📋 ICCIDs leídos ANTES del cambio: {len(iccids_antes_cambio)}")
+    
+    # 9. Esperar a que los módems detecten las nuevas SIM
+    console.print("[bold blue]🔍 Paso 2/3b: Esperando detección de SIM en todos los módems...[/bold blue]")
+    console.print("[yellow]⏳ Esto puede tomar 20-40 segundos...[/yellow]")
     
     sims_listas = 0
     iccids_verificados = {}
+    iccids_sin_cambio = 0
     
     def esperar_sim_y_verificar(puerto):
-        nonlocal sims_listas
+        nonlocal sims_listas, iccids_sin_cambio
         # Esperar a que la SIM esté lista (OPTIMIZADO UC20: 20 intentos)
         if esperar_sim_lista(puerto, max_intentos=20):
             # Obtener ICCID para confirmar cambio
             iccid = obtener_iccid_modem(puerto)
             if iccid:
+                # Verificar si cambió respecto al anterior
+                if puerto in iccids_antes_cambio:
+                    if iccid == iccids_antes_cambio[puerto]:
+                        escribir_log(f"⚠️ [{puerto}] ICCID NO CAMBIÓ: {iccid}")
+                        with modems_lock:
+                            iccids_sin_cambio += 1
+                        return False
+                    else:
+                        escribir_log(f"✅ [{puerto}] ICCID cambió: {iccids_antes_cambio[puerto]} → {iccid}")
+                
                 iccids_verificados[puerto] = iccid
                 with modems_lock:
                     sims_listas += 1
@@ -2085,11 +2196,21 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
     
     console.print(f"[green]✅ SIMs listas y verificadas: {sims_listas}/{len(modems_activos)}[/green]")
     
+    # Mostrar estadísticas de cambios de ICCID
+    if iccids_sin_cambio > 0:
+        console.print(f"[yellow]⚠️  {iccids_sin_cambio} módems NO cambiaron ICCID (posible problema mecánico)[/yellow]")
+        escribir_log(f"⚠️ {iccids_sin_cambio} módems sin cambio de ICCID")
+    
     # Mostrar algunos ICCIDs como confirmación
     if iccids_verificados:
         console.print("[dim]📋 Muestra de ICCIDs detectados:[/dim]")
         for i, (puerto, iccid) in enumerate(list(iccids_verificados.items())[:5]):
-            console.print(f"[dim]   {puerto}: {iccid}[/dim]")
+            # Mostrar si cambió
+            if puerto in iccids_antes_cambio:
+                cambio = "✅" if iccid != iccids_antes_cambio[puerto] else "⚠️"
+                console.print(f"[dim]   {cambio} {puerto}: {iccid}[/dim]")
+            else:
+                console.print(f"[dim]   {puerto}: {iccid}[/dim]")
         if len(iccids_verificados) > 5:
             console.print(f"[dim]   ... y {len(iccids_verificados) - 5} más[/dim]")
     
@@ -2145,7 +2266,9 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
         resultados_activacion = []
         
         def activar_y_guardar(puerto):
-            resultado = procesar_activacion_sim(puerto)
+            # Pasar el ICCID anterior si lo tenemos
+            iccid_anterior = iccids_antes_cambio.get(puerto, None)
+            resultado = procesar_activacion_sim(puerto, iccid_anterior=iccid_anterior)
             resultados_activacion.append(resultado)
         
         with Progress(
