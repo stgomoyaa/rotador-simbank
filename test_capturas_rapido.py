@@ -32,7 +32,8 @@ except ImportError:
 
 # Configuración
 TOTAL_SLOTS = 32
-TIEMPO_ESPERA_MINUTOS = 4  # Reducido de 2 a 4 (balance entre velocidad y efectividad)
+TIEMPO_ESPERA_MINUTOS = 4  # Balance entre velocidad y efectividad
+TIEMPO_REINICIO_MODEMS = 30  # Tiempo para reinicio de módems después de AT+CFUN=1,1
 CARPETA_CAPTURAS = "capturas_test_rapido"
 
 def crear_carpeta_capturas():
@@ -81,6 +82,46 @@ def obtener_iccid_puerto(com_port: str) -> str:
         
     except Exception as e:
         return ""
+
+def reiniciar_modems_cfun():
+    """Reinicia todos los módems con AT+CFUN=1,1 para forzar detección de nueva SIM"""
+    try:
+        import serial.tools.list_ports
+        
+        # Obtener todos los puertos COM disponibles
+        puertos_disponibles = [puerto.device for puerto in serial.tools.list_ports.comports()]
+        
+        # Excluir los puertos de los controladores SimBank
+        controladores_simbank = [config["com"] for config in RotadorSimBank.SIM_BANKS.values()]
+        puertos_modems = [p for p in puertos_disponibles if p not in controladores_simbank]
+        
+        print(f"  🔄 Reiniciando {len(puertos_modems)} módems con AT+CFUN=1,1...")
+        
+        reiniciados = 0
+        errores = 0
+        
+        # Reiniciar todos los módems en paralelo (más rápido)
+        for puerto_modem in puertos_modems:
+            try:
+                ser = serial.Serial(
+                    port=puerto_modem,
+                    baudrate=115200,
+                    timeout=1
+                )
+                ser.write(b"AT+CFUN=1,1\r\n")
+                time.sleep(0.1)
+                ser.close()
+                reiniciados += 1
+            except Exception:
+                errores += 1
+                continue
+        
+        print(f"  ✅ Reiniciados: {reiniciados} | ❌ Errores: {errores}")
+        return reiniciados > 0
+        
+    except Exception as e:
+        print(f"  ⚠️ Error reiniciando módems: {e}")
+        return False
 
 def cambiar_slot_pool_rapido(pool_name: str, pool_config: dict, slot_base: int) -> dict:
     """Cambia todos los puertos de un pool al slot y verifica el cambio"""
@@ -176,12 +217,18 @@ def procesar_slot_rapido(slot: int, carpeta_capturas: str, sim_banks: dict):
     print(f"  ⏳ Esperando 15 segundos para aplicar cambios físicos...")
     time.sleep(15)  # Reducido de 10 a 15 (balance)
     
-    # 3. Abrir HeroSMS
-    print("3️⃣ Abriendo HeroSMS...")
+    # 3. Reiniciar módems para forzar detección de nueva SIM
+    print("3️⃣ Reiniciando módems (AT+CFUN=1,1) para detectar nueva SIM...")
+    reiniciar_modems_cfun()
+    print(f"  ⏳ Esperando 30 segundos para reinicio de módems...")
+    time.sleep(30)  # Tiempo para que módems reinicien y detecten SIM
+    
+    # 4. Abrir HeroSMS
+    print("4️⃣ Abriendo HeroSMS...")
     abrir_simclient()
     
-    # 4. Espera inteligente (verificar cada 30 segundos si hay módems detectados)
-    print(f"4️⃣ Esperando {TIEMPO_ESPERA_MINUTOS} minutos para detección...")
+    # 5. Espera inteligente (verificar cada 30 segundos si hay módems detectados)
+    print(f"5️⃣ Esperando {TIEMPO_ESPERA_MINUTOS} minutos para detección...")
     tiempo_total = TIEMPO_ESPERA_MINUTOS * 60
     tiempo_transcurrido = 0
     intervalo_check = 30  # Verificar cada 30 segundos
@@ -197,12 +244,12 @@ def procesar_slot_rapido(slot: int, carpeta_capturas: str, sim_banks: dict):
         time.sleep(espera)
         tiempo_transcurrido += espera
     
-    # 5. Capturar pantalla
-    print("5️⃣ Capturando pantalla...")
+    # 6. Capturar pantalla
+    print("6️⃣ Capturando pantalla...")
     capturar_pantalla(carpeta_capturas, slot)
     
-    # 6. Cerrar HeroSMS (rápido)
-    print("6️⃣ Cerrando HeroSMS...")
+    # 7. Cerrar HeroSMS (rápido)
+    print("7️⃣ Cerrando HeroSMS...")
     cerrar_simclient()
     cerrar_puertos_serial()
     
@@ -215,9 +262,9 @@ def main():
     print("⚡ TEST RÁPIDO DE CAPTURAS DE SLOTS - ROTADOR SIMBANK")
     print("="*80)
     print(f"📊 Total de slots a procesar: {TOTAL_SLOTS}")
-    print(f"⏱️  Tiempo por slot: ~{TIEMPO_ESPERA_MINUTOS + 1} minutos")
-    print(f"⏱️  Tiempo total estimado: ~{(TIEMPO_ESPERA_MINUTOS + 1) * TOTAL_SLOTS / 60:.1f} horas")
-    print("⚡ Optimizado para velocidad con verificaciones mínimas")
+    print(f"⏱️  Tiempo por slot: ~{TIEMPO_ESPERA_MINUTOS + 2} minutos")
+    print(f"⏱️  Tiempo total estimado: ~{(TIEMPO_ESPERA_MINUTOS + 2) * TOTAL_SLOTS / 60:.1f} horas")
+    print("⚡ Incluye reinicio de módems (AT+CFUN=1,1) para detección correcta")
     print("="*80 + "\n")
     
     # Confirmar con el usuario
