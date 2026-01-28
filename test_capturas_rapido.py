@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 import threading
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Importar funciones del script principal
 try:
@@ -161,7 +162,7 @@ def obtener_iccid_puerto(com_port: str) -> dict:
         return resultado
 
 def obtener_iccids_actuales():
-    """Obtiene todos los ICCIDs actuales de los módems"""
+    """Obtiene todos los ICCIDs actuales de los módems usando hilos paralelos"""
     try:
         import serial.tools.list_ports
         
@@ -172,18 +173,32 @@ def obtener_iccids_actuales():
         controladores_simbank = [config["com"] for config in RotadorSimBank.SIM_BANKS.values()]
         puertos_modems = [p for p in puertos_disponibles if p not in controladores_simbank]
         
-        log_detallado(f"Leyendo ICCIDs de {len(puertos_modems)} módems...")
+        log_detallado(f"Leyendo ICCIDs de {len(puertos_modems)} módems en paralelo...")
         
         iccids_info = []
-        for puerto in puertos_modems:
-            info = obtener_iccid_puerto(puerto)
-            if info["iccid"]:
-                iccids_info.append(info)
-                log_detallado(f"  {puerto}: {info['iccid']}")
-            elif info["error"]:
-                log_detallado(f"  {puerto}: ERROR - {info['error']}")
-            else:
-                log_detallado(f"  {puerto}: Sin respuesta o ICCID no detectado")
+        
+        # Usar ThreadPoolExecutor para leer ICCIDs en paralelo
+        with ThreadPoolExecutor(max_workers=32) as executor:
+            # Crear todas las tareas
+            future_to_puerto = {executor.submit(obtener_iccid_puerto, puerto): puerto for puerto in puertos_modems}
+            
+            # Procesar resultados conforme se completan
+            for future in as_completed(future_to_puerto):
+                try:
+                    info = future.result()
+                    if info["iccid"]:
+                        iccids_info.append(info)
+                        log_detallado(f"  {info['puerto']}: {info['iccid']}")
+                    elif info["error"]:
+                        log_detallado(f"  {info['puerto']}: ERROR - {info['error']}")
+                    else:
+                        log_detallado(f"  {info['puerto']}: Sin respuesta o ICCID no detectado")
+                except Exception as e:
+                    puerto = future_to_puerto[future]
+                    log_detallado(f"  {puerto}: Excepción - {str(e)}")
+        
+        # Ordenar por puerto para que sea más fácil de leer
+        iccids_info.sort(key=lambda x: x["puerto"])
         
         # Detectar duplicados
         iccids = [info["iccid"] for info in iccids_info]
@@ -203,8 +218,20 @@ def obtener_iccids_actuales():
         log_detallado(f"❌ Error obteniendo ICCIDs: {e}")
         return []
 
+def reiniciar_un_modem(puerto_modem: str) -> dict:
+    """Reinicia un módulo individual con AT+CFUN=1,1"""
+    try:
+        respuesta = enviar_comando_at(puerto_modem, "AT+CFUN=1,1", timeout=1.0)
+        
+        if "OK" in respuesta or respuesta == "":
+            return {"puerto": puerto_modem, "exitoso": True, "respuesta": "OK"}
+        else:
+            return {"puerto": puerto_modem, "exitoso": True, "respuesta": respuesta[:50]}
+    except Exception as e:
+        return {"puerto": puerto_modem, "exitoso": False, "error": str(e)}
+
 def reiniciar_modems_cfun():
-    """Reinicia todos los módems con AT+CFUN=1,1 para forzar detección de nueva SIM"""
+    """Reinicia todos los módems con AT+CFUN=1,1 usando hilos paralelos"""
     try:
         import serial.tools.list_ports
         
@@ -215,30 +242,37 @@ def reiniciar_modems_cfun():
         controladores_simbank = [config["com"] for config in RotadorSimBank.SIM_BANKS.values()]
         puertos_modems = [p for p in puertos_disponibles if p not in controladores_simbank]
         
-        print(f"  🔄 Reiniciando {len(puertos_modems)} módems con AT+CFUN=1,1...")
-        log_detallado(f"Enviando AT+CFUN=1,1 a {len(puertos_modems)} módems...")
+        print(f"  🔄 Reiniciando {len(puertos_modems)} módems con AT+CFUN=1,1 (paralelo)...")
+        log_detallado(f"Enviando AT+CFUN=1,1 a {len(puertos_modems)} módems en paralelo...")
         
         reiniciados = 0
         errores = 0
-        errores_detalle = []
         
-        # Reiniciar todos los módems
-        for puerto_modem in puertos_modems:
-            try:
-                respuesta = enviar_comando_at(puerto_modem, "AT+CFUN=1,1", timeout=1.0)
-                
-                if "OK" in respuesta or respuesta == "":
-                    log_detallado(f"  ✅ {puerto_modem}: OK")
-                    reiniciados += 1
-                else:
-                    log_detallado(f"  ⚠️  {puerto_modem}: {respuesta[:50]}")
-                    reiniciados += 1
+        # Usar ThreadPoolExecutor para reiniciar en paralelo
+        with ThreadPoolExecutor(max_workers=32) as executor:
+            # Crear todas las tareas
+            future_to_puerto = {executor.submit(reiniciar_un_modem, puerto): puerto for puerto in puertos_modems}
+            
+            # Procesar resultados conforme se completan
+            resultados = []
+            for future in as_completed(future_to_puerto):
+                try:
+                    resultado = future.result()
+                    resultados.append(resultado)
                     
-            except Exception as e:
-                log_detallado(f"  ❌ {puerto_modem}: {str(e)}")
-                errores += 1
-                errores_detalle.append(f"{puerto_modem}: {str(e)}")
-                continue
+                    if resultado["exitoso"]:
+                        if resultado["respuesta"] == "OK":
+                            log_detallado(f"  ✅ {resultado['puerto']}: OK")
+                        else:
+                            log_detallado(f"  ⚠️  {resultado['puerto']}: {resultado['respuesta']}")
+                        reiniciados += 1
+                    else:
+                        log_detallado(f"  ❌ {resultado['puerto']}: {resultado['error']}")
+                        errores += 1
+                except Exception as e:
+                    puerto = future_to_puerto[future]
+                    log_detallado(f"  ❌ {puerto}: Excepción - {str(e)}")
+                    errores += 1
         
         print(f"  ✅ Reiniciados: {reiniciados} | ❌ Errores: {errores}")
         log_detallado(f"Resumen: {reiniciados} reiniciados, {errores} errores")
@@ -367,7 +401,15 @@ def procesar_slot_rapido(slot: int, carpeta_capturas: str, sim_banks: dict):
     time.sleep(1)
     log_detallado("HeroSMS cerrado y puertos liberados")
     
-    # 1.5. Leer ICCIDs ANTES del cambio
+    # 1.5. Reiniciar módems ANTES de leer ICCIDs iniciales
+    print("  🔄 Reiniciando módems antes de leer estado inicial...")
+    log_detallado("\nReiniciando módems para estado conocido...")
+    reiniciar_modems_cfun()
+    print(f"  ⏳ Esperando 30 segundos para que módems reinicien...")
+    log_detallado("Esperando 30 segundos...")
+    time.sleep(30)
+    
+    # 1.6. Leer ICCIDs ANTES del cambio
     print("  📋 Leyendo ICCIDs ANTES del cambio...")
     log_detallado("\n--- ICCIDs ANTES DEL CAMBIO ---")
     iccids_antes = obtener_iccids_actuales()
@@ -476,9 +518,10 @@ def main():
     print("⚡ TEST RÁPIDO DE CAPTURAS DE SLOTS - ROTADOR SIMBANK")
     print("="*80)
     print(f"📊 Total de slots a procesar: {TOTAL_SLOTS}")
-    print(f"⏱️  Tiempo por slot: ~{TIEMPO_ESPERA_MINUTOS + 2} minutos")
-    print(f"⏱️  Tiempo total estimado: ~{(TIEMPO_ESPERA_MINUTOS + 2) * TOTAL_SLOTS / 60:.1f} horas")
-    print("⚡ Incluye reinicio de módems (AT+CFUN=1,1) para detección correcta")
+    print(f"⏱️  Tiempo por slot: ~{TIEMPO_ESPERA_MINUTOS + 3} minutos")
+    print(f"⏱️  Tiempo total estimado: ~{(TIEMPO_ESPERA_MINUTOS + 3) * TOTAL_SLOTS / 60:.1f} horas")
+    print("⚡ Con hilos paralelos para velocidad máxima")
+    print("⚡ Incluye doble reinicio de módems (AT+CFUN=1,1)")
     print("="*80 + "\n")
     
     # Confirmar con el usuario
