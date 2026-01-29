@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.11.2"  # FIX CRÍTICO: Corregido error de formato Rich que causaba crash del script
+    VERSION = "2.11.3"  # OPTIMIZACIÓN UC20: Timeouts aumentados + alertas críticas para ICCIDs duplicados
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -89,16 +89,17 @@ class Settings:
     # Tiempos (en minutos o segundos según contexto)
     INTERVALO_MINUTOS = 30
     TIEMPO_APLICAR_SLOT = 25  # OPTIMIZADO PARA UC20: Switches mecánicos + detección de nueva SIM (era 10)
-    TIEMPO_CFUN_RESET = 90  # NUEVO: Tiempo después de AT+CFUN=1,1 para reinicio completo UC20 (era implícito en TIEMPO_APLICAR_SLOT)
+    TIEMPO_CFUN_RESET = 120  # OPTIMIZADO PARA UC20: Tiempo después de AT+CFUN=1,1 para reinicio completo (era 90, aumentado por logs)
     TIEMPO_ESTABILIZACION_FINAL = 20  # OPTIMIZADO PARA UC20: Más tiempo para registro en red (era 15)
     TIEMPO_ANTES_SIMCLIENT = 5  # OPTIMIZADO PARA UC20: Más tiempo antes de abrir HeroSMS (era 3)
     TIEMPO_SIMCLIENT_DETECTAR = 10  # OPTIMIZADO PARA UC20: Más tiempo para detección (era 8)
     
     # Reintentos y timeouts
-    MAX_INTENTOS_SIM = 25  # OPTIMIZADO PARA UC20: Más intentos (era 20) - UC20 más lento que M35
+    MAX_INTENTOS_SIM = 30  # OPTIMIZADO PARA UC20: Más intentos (era 25, aumentado por logs) - UC20 más lento que M35
     MAX_INTENTOS_COMANDO_AT = 3
     MAX_INTENTOS_REGISTRO_RED = 30  # OPTIMIZADO PARA UC20: Más intentos para registro (era 20) - UC20 más lento que M35
     MAX_INTENTOS_CAMBIO_SLOT = 3  # Nuevo: intentos para verificar cambio de ICCID
+    UMBRAL_ICCIDS_DUPLICADOS = 5  # NUEVO: Máximo de ICCIDs duplicados permitidos antes de alertar
     TIMEOUT_SERIAL = 4  # OPTIMIZADO PARA UC20: Más timeout (era 3)
     BAUDRATE = 115200
     
@@ -2200,6 +2201,22 @@ def cambiar_slot_simbank(slot: int, iteracion: int, abrir_programa_al_final: boo
     if iccids_sin_cambio > 0:
         console.print(f"[yellow]⚠️  {iccids_sin_cambio} módems NO cambiaron ICCID (posible problema mecánico)[/yellow]")
         escribir_log(f"⚠️ {iccids_sin_cambio} módems sin cambio de ICCID")
+        
+        # NUEVO: Alerta crítica si hay muchos ICCIDs duplicados
+        if iccids_sin_cambio > Settings.UMBRAL_ICCIDS_DUPLICADOS:
+            console.print(f"[bold red]🚨 ALERTA CRÍTICA: {iccids_sin_cambio} ICCIDs duplicados excede umbral de {Settings.UMBRAL_ICCIDS_DUPLICADOS}[/bold red]")
+            console.print(f"[bold red]   → Verificar SIM Banks físicamente (switches mecánicos)[/bold red]")
+            console.print(f"[bold red]   → Posible problema hardware en controladores de pools[/bold red]")
+            escribir_log(f"🚨 ALERTA CRÍTICA: {iccids_sin_cambio} ICCIDs duplicados > umbral {Settings.UMBRAL_ICCIDS_DUPLICADOS}")
+            
+            # Listar todos los puertos con ICCID sin cambio
+            puertos_sin_cambio = [puerto for puerto in modems_activos 
+                                  if puerto in iccids_antes_cambio and 
+                                  puerto in iccids_verificados and 
+                                  iccids_antes_cambio[puerto] == iccids_verificados[puerto]]
+            if puertos_sin_cambio:
+                console.print(f"[red]   Puertos problemáticos: {', '.join(puertos_sin_cambio[:10])}{'...' if len(puertos_sin_cambio) > 10 else ''}[/red]")
+                escribir_log(f"   Puertos sin cambio de ICCID: {', '.join(puertos_sin_cambio)}")
     
     # Mostrar algunos ICCIDs como confirmación
     if iccids_verificados:
