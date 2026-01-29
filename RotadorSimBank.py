@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.11.1"  # FIX: Eliminada re-verificación innecesaria de CREG (ahorrando 4 minutos por slot)
+    VERSION = "2.11.2"  # FIX CRÍTICO: Corregido error de formato Rich que causaba crash del script
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -2695,8 +2695,8 @@ def modo_continuo_con_mantenimiento():
             console.print(f"[bold cyan]{'─'*80}[/bold cyan]")
             console.print(f"[cyan]⏱️  Tiempo desde última activación masiva: {tiempo_desde_ultima_activacion/3600:.1f}h[/cyan]")
             console.print(f"[cyan]⏱️  Próxima activación masiva en: {max(0, tiempo_hasta_proxima_activacion)/3600:.1f}h[/cyan]")
-            console.print(f"[yellow]⏱️  Tiempo desde último reinicio HeroSMS: {tiempo_desde_ultimo_reinicio/60:.1f}min[/cyan]")
-            console.print(f"[yellow]⏱️  Próximo reinicio HeroSMS en: {max(0, tiempo_hasta_proximo_reinicio)/60:.1f}min[/cyan]")
+            console.print(f"[yellow]⏱️  Tiempo desde último reinicio HeroSMS: {tiempo_desde_ultimo_reinicio/60:.1f}min[/yellow]")
+            console.print(f"[yellow]⏱️  Próximo reinicio HeroSMS en: {max(0, tiempo_hasta_proximo_reinicio)/60:.1f}min[/yellow]")
             console.print(f"[bold cyan]{'─'*80}[/bold cyan]\n")
             
             escribir_log(f"📊 Estado: Próxima activación en {max(0, tiempo_hasta_proxima_activacion)/3600:.1f}h | Próximo reinicio HeroSMS en {max(0, tiempo_hasta_proximo_reinicio)/60:.1f}min")
