@@ -74,7 +74,7 @@ console = Console()
 class Settings:
     """Configuración centralizada del rotador"""
     # Version
-    VERSION = "2.11.3"  # OPTIMIZACIÓN UC20: Timeouts aumentados + alertas críticas para ICCIDs duplicados
+    VERSION = "2.11.4"  # OPTIMIZACIÓN M35: Timeouts reducidos + verificación de señal antes de activar
     REPO_URL = "https://github.com/stgomoyaa/rotador-simbank.git"
     
     # Agente de Control Remoto
@@ -88,19 +88,20 @@ class Settings:
     
     # Tiempos (en minutos o segundos según contexto)
     INTERVALO_MINUTOS = 30
-    TIEMPO_APLICAR_SLOT = 25  # OPTIMIZADO PARA UC20: Switches mecánicos + detección de nueva SIM (era 10)
-    TIEMPO_CFUN_RESET = 120  # OPTIMIZADO PARA UC20: Tiempo después de AT+CFUN=1,1 para reinicio completo (era 90, aumentado por logs)
-    TIEMPO_ESTABILIZACION_FINAL = 20  # OPTIMIZADO PARA UC20: Más tiempo para registro en red (era 15)
-    TIEMPO_ANTES_SIMCLIENT = 5  # OPTIMIZADO PARA UC20: Más tiempo antes de abrir HeroSMS (era 3)
-    TIEMPO_SIMCLIENT_DETECTAR = 10  # OPTIMIZADO PARA UC20: Más tiempo para detección (era 8)
+    TIEMPO_APLICAR_SLOT = 25  # OPTIMIZADO: Switches mecánicos + detección de nueva SIM
+    TIEMPO_CFUN_RESET = 90  # OPTIMIZADO PARA M35: Más rápidos que UC20 (era 120, reducido para M35)
+    TIEMPO_ESTABILIZACION_FINAL = 15  # OPTIMIZADO PARA M35: Registro más rápido (era 20)
+    TIEMPO_ANTES_SIMCLIENT = 3  # OPTIMIZADO PARA M35: Menos tiempo requerido (era 5)
+    TIEMPO_SIMCLIENT_DETECTAR = 8  # OPTIMIZADO PARA M35: Detección más rápida (era 10)
     
     # Reintentos y timeouts
-    MAX_INTENTOS_SIM = 30  # OPTIMIZADO PARA UC20: Más intentos (era 25, aumentado por logs) - UC20 más lento que M35
+    MAX_INTENTOS_SIM = 25  # OPTIMIZADO PARA M35: Suficientes intentos (M35 más rápido que UC20)
     MAX_INTENTOS_COMANDO_AT = 3
-    MAX_INTENTOS_REGISTRO_RED = 30  # OPTIMIZADO PARA UC20: Más intentos para registro (era 20) - UC20 más lento que M35
+    MAX_INTENTOS_REGISTRO_RED = 25  # OPTIMIZADO PARA M35: M35 más rápido en registro (era 30)
     MAX_INTENTOS_CAMBIO_SLOT = 3  # Nuevo: intentos para verificar cambio de ICCID
     UMBRAL_ICCIDS_DUPLICADOS = 5  # NUEVO: Máximo de ICCIDs duplicados permitidos antes de alertar
-    TIMEOUT_SERIAL = 4  # OPTIMIZADO PARA UC20: Más timeout (era 3)
+    TIMEOUT_SERIAL = 3  # OPTIMIZADO PARA M35: M35 responden más rápido (era 4)
+    CSQ_MINIMO = 10  # NUEVO: Señal mínima requerida para activación (CSQ < 10 = sin señal suficiente)
     BAUDRATE = 115200
     
     # Delays mejorados (fix para CME ERROR: 14)
@@ -1372,8 +1373,13 @@ def procesar_activacion_sim(puerto: str, iccid_anterior: str = None) -> dict:
             resultado["intentos"] = 0
             return resultado
         
-        # 7. VERIFICAR SEÑAL (opcional, para diagnóstico)
-        verificar_intensidad_senal(puerto)
+        # 7. VERIFICAR SEÑAL ANTES DE ACTIVAR (nuevo: evita intentos en SIMs sin señal)
+        señal_ok, csq = verificar_intensidad_senal(puerto)
+        if not señal_ok:
+            log_activacion(f"❌ [{puerto}] Señal insuficiente (CSQ={csq}) - Saltando activación")
+            log_activacion(f"⚠️ [{puerto}] Se requiere CSQ >= {Settings.CSQ_MINIMO} para activar")
+            resultado["intentos"] = 0
+            return resultado
         
         # 8. Intentar activación
         for intento in range(Settings.INTENTOS_ACTIVACION):
@@ -1686,10 +1692,16 @@ def verificar_registro_modems_global(modems_activos: list) -> tuple:
     
     return registrados, sin_registrar
 
-def verificar_intensidad_senal(puerto: str) -> int:
-    """Verifica la intensidad de señal del módem (0-31, 99=desconocido)"""
+def verificar_intensidad_senal(puerto: str) -> tuple:
+    """Verifica la intensidad de señal del módem y si es suficiente para activación
+    
+    Returns:
+        tuple: (señal_ok: bool, rssi: int)
+        - señal_ok: True si CSQ >= CSQ_MINIMO y != 99
+        - rssi: valor CSQ (0-31, 99=desconocido)
+    """
     if Settings.MODO_DRY_RUN:
-        return 20
+        return True, 20
     
     try:
         respuesta = enviar_comando(puerto, "AT+CSQ", espera=0.5)
@@ -1699,21 +1711,26 @@ def verificar_intensidad_senal(puerto: str) -> int:
         match = re.search(r'\+CSQ:\s*(\d+),', respuesta)
         if match:
             rssi = int(match.group(1))
+            
+            # Verificar si es señal válida y suficiente
+            señal_ok = (rssi >= Settings.CSQ_MINIMO and rssi != 99)
+            
             if rssi == 99:
-                log_activacion(f"📶 [{puerto}] Señal desconocida")
+                log_activacion(f"📶 [{puerto}] Señal desconocida (CSQ=99) - ❌ INSUFICIENTE")
             elif rssi >= 20:
-                log_activacion(f"📶 [{puerto}] Señal excelente ({rssi}/31)")
+                log_activacion(f"📶 [{puerto}] Señal excelente ({rssi}/31) - ✅ OK")
             elif rssi >= 15:
-                log_activacion(f"📶 [{puerto}] Señal buena ({rssi}/31)")
-            elif rssi >= 10:
-                log_activacion(f"📶 [{puerto}] Señal regular ({rssi}/31)")
+                log_activacion(f"📶 [{puerto}] Señal buena ({rssi}/31) - ✅ OK")
+            elif rssi >= Settings.CSQ_MINIMO:
+                log_activacion(f"📶 [{puerto}] Señal regular ({rssi}/31) - ⚠️ MÍNIMA pero aceptable")
             else:
-                log_activacion(f"📶 [{puerto}] Señal débil ({rssi}/31)")
-            return rssi
-        return 0
+                log_activacion(f"📶 [{puerto}] Señal débil ({rssi}/31) - ❌ INSUFICIENTE (< {Settings.CSQ_MINIMO})")
+            
+            return señal_ok, rssi
+        return False, 0
     except Exception as e:
         log_activacion(f"⚠️ [{puerto}] Error verificando señal: {e}")
-        return 0
+        return False, 0
 
 # ==================== FUNCIONES DE SIMCLIENT ====================
 def cerrar_simclient():
